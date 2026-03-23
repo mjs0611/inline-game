@@ -1,0 +1,86 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700;900&display=swap');
+
+* { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+html, body { width: 100%; height: 100%; background: #fff; overflow: hidden; }
+body { font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif; }
+
+#gameCanvas { position: fixed; top: 0; left: 0; touch-action: none; }
+
+/* ── Intro ── */
+#intro {
+  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  pointer-events: none; z-index: 10;
+  transition: opacity 0.2s;
+}
+#intro.hidden { opacity: 0; pointer-events: none; }
+#gameTitle {
+  font-size: clamp(44px, 11vw, 72px);
+  font-weight: 900; letter-spacing: -4px; color: #000; margin-bottom: 6px;
+}
+#gameSub { font-size: 10px; letter-spacing: 5px; color: #bbb; margin-bottom: 64px; text-transform: uppercase; }
+#startBtn {
+  pointer-events: all;
+  background: #000; color: #fff; border: none;
+  padding: 18px 60px; font-size: 13px;
+  font-weight: 700; letter-spacing: 3px;
+  border-radius: 0; cursor: pointer;
+  font-family: inherit;
+  transition: transform 0.1s;
+}
+#startBtn:active { transform: scale(0.95); }
+
+/* ── Score ── */
+#score {
+  position: fixed; top: 18px; left: 20px;
+  font-size: 18px; font-weight: 700; letter-spacing: 1px; color: #000;
+  z-index: 10; display: none;
+}
+
+/* ── Game Over ── */
+#gameOver {
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 100%;
+  background: rgba(255,255,255,0.97);
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 20;
+}
+#gameOver.show { display: flex; }
+#goLabel { font-size: 10px; letter-spacing: 5px; color: #bbb; margin-bottom: 20px; text-transform: uppercase; }
+#goScore {
+  font-size: clamp(88px, 24vw, 140px);
+  font-weight: 900; letter-spacing: -6px; color: #000;
+  line-height: 1; margin-bottom: 4px;
+}
+#goUnit { font-size: 11px; letter-spacing: 4px; color: #ccc; margin-bottom: 60px; text-transform: uppercase; }
+.goBtn {
+  width: 230px; padding: 17px; margin: 5px;
+  border-radius: 0; font-size: 13px;
+  font-weight: 700; letter-spacing: 1px;
+  cursor: pointer; border: none;
+  font-family: inherit;
+  transition: transform 0.1s;
+}
+.goBtn:active { transform: scale(0.96); }
+.goBtn.primary { background: #000; color: #fff; }
+.goBtn.secondary { background: #fff; color: #000; border: 2px solid #000; }
+
+/* ── Ad fallback ── */
+#adScreen {
+  position: fixed; top: 0; left: 0;
+  width: 100%; height: 100%; background: #fff;
+  display: none; flex-direction: column;
+  align-items: center; justify-content: center;
+  z-index: 30;
+}
+#adScreen.show { display: flex; }
+#adTag { font-size: 9px; letter-spacing: 5px; color: #ccc; margin-bottom: 20px; text-transform: uppercase; }
+#adBox {
+  width: min(300px, 80vw); height: 200px;
+  background: #f3f3f3; border-radius: 0;
+  display: flex; align-items: center; justify-content: center; margin-bottom: 20px;
+}
+#adCount { font-size: 56px; font-weight: 900; color: #ddd; }
+#adSub { font-size: 11px; color: #ccc; letter-spacing: 2px; }

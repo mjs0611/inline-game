@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>In Line</title>
+  <link rel="stylesheet" href="/src/style.css">
+</head>
+<body>
+
+<canvas id="gameCanvas"></canvas>
+
+<!-- Intro -->
+<div id="intro">
+  <div id="gameTitle">In Line</div>
+  <div id="gameSub">Dodge · Survive · Escape</div>
+  <button id="startBtn">START</button>
+</div>
+
+<!-- Score -->
+<div id="score">0m</div>
+
+<!-- Game Over -->
+<div id="gameOver">
+  <div id="goLabel">GAME OVER</div>
+  <div id="goScore">0</div>
+  <div id="goUnit">METERS</div>
+  <button class="goBtn primary" id="retryBtn">(광고 보고) 다시 도전</button>
+  <button class="goBtn secondary" id="leaderboardBtn">리더보드 보기</button>
+</div>
+
+<!-- Ad fallback (AIT 미지원 환경 전용) -->
+<div id="adScreen">
+  <div id="adTag">ADVERTISEMENT</div>
+  <div id="adBox"><div id="adCount">5</div></div>
+  <div id="adSub">잠시 후 게임이 시작됩니다</div>
+</div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
