@@ -242,6 +242,7 @@ let shakeX = 0, shakeY = 0;
 let gameTime = 0;
 let nextDirChange = 15; // 첫 방향 전환까지 15초
 let dirChangeGrace = 0; // 방향전환 직후 난이도 완화 (1→0으로 감소)
+let dirHintAlpha = 0;
 
 function updateShake(dt: number) {
   if (shakeIntensity > 0) {
@@ -260,6 +261,7 @@ function triggerDirChange() {
   spawnDir = dirs[Math.floor(Math.random() * dirs.length)];
   obstacles = []; // 기존 장애물 클리어
   dirChangeGrace = 1.0; // 3초 난이도 완화 시작
+  dirHintAlpha = 1;
   // 색상 전환
   colorIdx = (colorIdx + 1) % COLORS.length;
   gameColor = COLORS[colorIdx];
@@ -497,6 +499,22 @@ function drawDirChangeFlash() {
   }
 }
 
+// 방향 전환 힌트 화살표
+function drawDirHint() {
+  if (dirHintAlpha <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = dirHintAlpha * 0.28;
+  ctx.fillStyle = gameColor;
+  const sz = Math.min(W, GH) * 0.38;
+  ctx.font = `900 ${sz}px "Space Grotesk", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const arrow = spawnDir === 'left' ? '←' : spawnDir === 'right' ? '→' : spawnDir === 'top' ? '↑' : '↓';
+  ctx.fillText(arrow, W / 2, GH / 2);
+  ctx.restore();
+  dirHintAlpha = Math.max(0, dirHintAlpha - 0.03);
+}
+
 // ── Game Loop ────────────────────────────────────────────────────────────────
 let lastT = 0;
 function loop(ts: number) {
@@ -565,6 +583,7 @@ function loop(ts: number) {
     ctx.beginPath(); ctx.rect(0, 0, W, GH); ctx.clip();
     drawObs();
     drawDirChangeFlash();
+    drawDirHint();
     drawDot(player.x, player.y, player.r);
     ctx.restore();
     drawControlArea();
@@ -601,6 +620,7 @@ function startGame() {
   spawnDir = 'left';
   shakeIntensity = 0;
   colorIdx = 0; gameColor = COLORS[0]; applyColor();
+  dirHintAlpha = 0;
   resetPlayer();
   state = S.PLAY;
   scoreEl.style.display = 'block';
