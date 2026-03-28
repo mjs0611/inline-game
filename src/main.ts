@@ -509,7 +509,7 @@ function drawDirHint() {
   ctx.font = `900 ${sz}px "Space Grotesk", sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  const arrow = spawnDir === 'left' ? '←' : spawnDir === 'right' ? '→' : spawnDir === 'top' ? '↑' : '↓';
+  const arrow = spawnDir === 'left' ? '→' : spawnDir === 'right' ? '←' : spawnDir === 'top' ? '↓' : '↑';
   ctx.fillText(arrow, W / 2, GH / 2);
   ctx.restore();
   dirHintAlpha = Math.max(0, dirHintAlpha - 0.03);
