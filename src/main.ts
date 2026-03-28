@@ -71,7 +71,7 @@ let W: number, H: number, GH: number, CH: number;
 function resize() {
   W  = canvas.width  = window.innerWidth;
   H  = canvas.height = window.innerHeight;
-  GH = Math.floor(H * 0.6);
+  GH = Math.floor(H * 0.75);
   CH = H - GH;
 }
 resize();
@@ -630,6 +630,7 @@ function startGame() {
 
 async function showGameOver() {
   document.getElementById('goScore')!.textContent = String(score);
+  updateRetryBtn();
   document.getElementById('gameOver')!.classList.add('show');
   try {
     const result = await ait?.submitGameCenterLeaderBoardScore({ score: String(score) });
