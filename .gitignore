@@ -3,3 +3,4 @@ dist/
 .ait/
 *.ait
 .DS_Store
+*.jks
