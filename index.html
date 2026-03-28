@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
   <title>In Line</title>
   <link rel="stylesheet" href="/src/style.css">
 </head>
@@ -25,8 +25,22 @@
   <div id="goLabel">GAME OVER</div>
   <div id="goScore">0</div>
   <div id="goUnit">METERS</div>
-  <button class="goBtn primary" id="retryBtn">(광고 보고) 다시 도전</button>
+  <button class="goBtn primary" id="retryBtn">다시 도전</button>
   <button class="goBtn secondary" id="leaderboardBtn">리더보드 보기</button>
+</div>
+
+<!-- Direction change pulse overlay -->
+<div id="dirPulse"></div>
+
+<!-- Close confirmation -->
+<div id="closeConfirm">
+  <div id="closeBox">
+    <div id="closeMsg">게임을 종료할까요?</div>
+    <div class="closeBtns">
+      <button id="closeNo">계속하기</button>
+      <button id="closeYes">종료</button>
+    </div>
+  </div>
 </div>
 
 <!-- Ad fallback (AIT 미지원 환경 전용) -->
