@@ -5,7 +5,7 @@ export default defineConfig({
   brand: {
     displayName: 'In Line',
     primaryColor: '#000000',
-    icon: '', // 콘솔에서 업로드한 아이콘 URL로 교체
+    icon: 'https://static.toss.im/appsintoss/27829/98f6c571-6e3e-46af-af2b-6db5dbe9abcb.png',
   },
   web: {
     host: 'localhost',
