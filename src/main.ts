@@ -7,9 +7,16 @@ type AitModule = {
   loadFullScreenAd: typeof import('@apps-in-toss/web-framework').loadFullScreenAd;
   showFullScreenAd: typeof import('@apps-in-toss/web-framework').showFullScreenAd;
   generateHapticFeedback: typeof import('@apps-in-toss/web-framework').generateHapticFeedback;
+  getUserKeyForGame: typeof import('@apps-in-toss/web-framework').getUserKeyForGame;
 };
 let ait: AitModule | null = null;
 let aitAdLoaded = false;
+
+// ── 유저 식별자 ───────────────────────────────────────────────────────────────
+let userHash: string | null = localStorage.getItem('userHash');
+
+function getRetriesKey()     { return `freeRetries_${userHash ?? 'guest'}`; }
+function getRetriesDateKey() { return `freeRetriesDate_${userHash ?? 'guest'}`; }
 
 import('@apps-in-toss/web-framework').then((m) => {
   ait = {
@@ -18,9 +25,19 @@ import('@apps-in-toss/web-framework').then((m) => {
     loadFullScreenAd: m.loadFullScreenAd,
     showFullScreenAd: m.showFullScreenAd,
     generateHapticFeedback: m.generateHapticFeedback,
+    getUserKeyForGame: m.getUserKeyForGame,
   };
   document.getElementById('leaderboardBtn')!.style.display = 'block';
   preloadAitAd();
+  // 유저 식별자 조회 및 저장 (16번 체크리스트)
+  m.getUserKeyForGame().then((result) => {
+    if (result && result !== 'INVALID_CATEGORY' && result !== 'ERROR' && result.type === 'HASH') {
+      userHash = result.hash;
+      localStorage.setItem('userHash', result.hash);
+      freeRetries = loadFreeRetries(); // 유저별 키로 재로드
+      updateRetryBtn();
+    }
+  }).catch(() => {});
 }).catch(() => {});
 
 function preloadAitAd() {
@@ -653,18 +670,18 @@ function todayStr() {
   return new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
 }
 function loadFreeRetries(): number {
-  const saved = localStorage.getItem('freeRetries');
-  const lastDate = localStorage.getItem('freeRetriesDate');
+  const saved = localStorage.getItem(getRetriesKey());
+  const lastDate = localStorage.getItem(getRetriesDateKey());
   if (lastDate !== todayStr()) {
-    localStorage.setItem('freeRetries', '3');
-    localStorage.setItem('freeRetriesDate', todayStr());
+    localStorage.setItem(getRetriesKey(), '3');
+    localStorage.setItem(getRetriesDateKey(), todayStr());
     return 3;
   }
   return saved !== null ? parseInt(saved, 10) : 3;
 }
 function saveFreeRetries(n: number) {
-  localStorage.setItem('freeRetries', String(n));
-  localStorage.setItem('freeRetriesDate', todayStr());
+  localStorage.setItem(getRetriesKey(), String(n));
+  localStorage.setItem(getRetriesDateKey(), todayStr());
 }
 
 let freeRetries = loadFreeRetries();
