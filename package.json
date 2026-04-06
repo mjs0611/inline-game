@@ -1,11 +1,12 @@
 {
   "name": "inline-game",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "private": true,
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "bundle": "ait build"
   },
   "dependencies": {
     "@apps-in-toss/web-framework": "^2.0.0",

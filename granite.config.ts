@@ -3,7 +3,7 @@ import { defineConfig } from '@apps-in-toss/web-framework/config';
 export default defineConfig({
   appName: 'inline-game', // 콘솔에서 설정한 앱 이름과 동일하게
   brand: {
-    displayName: 'In Line',
+    displayName: '인 라인',
     primaryColor: '#3182F6',
     icon: 'https://static.toss.im/appsintoss/27829/98f6c571-6e3e-46af-af2b-6db5dbe9abcb.png',
   },

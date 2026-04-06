@@ -57,7 +57,9 @@ body { font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-ser
   font-weight: 900; letter-spacing: -6px; color: #000;
   line-height: 1; margin-bottom: 4px;
 }
-#goUnit { font-size: 11px; letter-spacing: 4px; color: #ccc; margin-bottom: 60px; text-transform: uppercase; }
+#goUnit { font-size: 11px; letter-spacing: 4px; color: #ccc; margin-bottom: 12px; text-transform: uppercase; }
+#goBest { font-size: 11px; letter-spacing: 2px; color: #bbb; margin-bottom: 48px; text-transform: uppercase; min-height: 16px; }
+#goBest.newbest { color: #000; font-weight: 700; letter-spacing: 3px; }
 .goBtn {
   width: 230px; padding: 17px; margin: 5px;
   border-radius: 0; font-size: 13px;

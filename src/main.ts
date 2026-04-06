@@ -12,12 +12,6 @@ type AitModule = {
 let ait: AitModule | null = null;
 let aitAdLoaded = false;
 
-// ── 유저 식별자 ───────────────────────────────────────────────────────────────
-let userHash: string | null = localStorage.getItem('userHash');
-
-function getRetriesKey()     { return `freeRetries_${userHash ?? 'guest'}`; }
-function getRetriesDateKey() { return `freeRetriesDate_${userHash ?? 'guest'}`; }
-
 import('@apps-in-toss/web-framework').then((m) => {
   ait = {
     submitGameCenterLeaderBoardScore: m.submitGameCenterLeaderBoardScore,
@@ -30,14 +24,7 @@ import('@apps-in-toss/web-framework').then((m) => {
   document.getElementById('leaderboardBtn')!.style.display = 'block';
   preloadAitAd();
   // 유저 식별자 조회 및 저장 (16번 체크리스트)
-  m.getUserKeyForGame().then((result) => {
-    if (result && result !== 'INVALID_CATEGORY' && result !== 'ERROR' && result.type === 'HASH') {
-      userHash = result.hash;
-      localStorage.setItem('userHash', result.hash);
-      freeRetries = loadFreeRetries(); // 유저별 키로 재로드
-      updateRetryBtn();
-    }
-  }).catch(() => {});
+  m.getUserKeyForGame().catch(() => {});
 }).catch(() => {});
 
 function preloadAitAd() {
@@ -98,6 +85,7 @@ window.addEventListener('resize', resize);
 const S = { INTRO: 0, ZOOM: 1, PLAY: 2, DEAD: 3, OVER: 4 } as const;
 type GameState = typeof S[keyof typeof S];
 let state: GameState = S.INTRO;
+let invincibleT = 0; // 이어하기 후 무적 시간
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 const easeOut = (t: number) => 1 - Math.pow(1 - t, 3);
@@ -124,7 +112,7 @@ function makeObs(fullH: boolean, dir: 'left' | 'top' | 'right' | 'bottom' = 'lef
   const aH   = fullH ? H : GH;
   const pad  = 35;
   const diff = fullH ? 0 : Math.min(score / 100, 4);
-  const earlyEase = score < 30 ? 0.8 : 1.0;
+  const earlyEase = score < 30 ? 0.9 : 1.0;
   const graceMult = 1 - dirChangeGrace * 0.35; // grace 중 최대 35% 속도 감소
   const spd  = rand((5.5 + diff * 2.2) * earlyEase * graceMult, (8 + diff * 2.2) * earlyEase * graceMult);
 
@@ -367,14 +355,53 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
+// ── Best Score ────────────────────────────────────────────────────────────────
+const BEST_KEY = 'bestScore';
+function loadBest(): number { return parseInt(localStorage.getItem(BEST_KEY) ?? '0', 10); }
+function saveBest(n: number) { localStorage.setItem(BEST_KEY, String(n)); }
+
+// ── Milestone Toast ───────────────────────────────────────────────────────────
+const MILESTONES = [50, 100, 200, 300, 500, 1000];
+let milestoneIdx = 0;
+let toast: { text: string; alpha: number; y: number } | null = null;
+
+function updateToast(dt: number) {
+  if (!toast) return;
+  toast.alpha = Math.max(0, toast.alpha - dt * 0.9);
+  toast.y -= dt * 28;
+  if (toast.alpha <= 0) toast = null;
+}
+
+function drawToast() {
+  if (!toast) return;
+  ctx.save();
+  ctx.globalAlpha = toast.alpha * toast.alpha;
+  ctx.fillStyle = gameColor;
+  ctx.font = `900 ${Math.floor(Math.min(W, GH) * 0.13)}px "Space Grotesk", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(toast.text, W / 2, toast.y);
+  ctx.restore();
+}
+
 // ── Score ─────────────────────────────────────────────────────────────────────
 let score = 0, scoreF = 0;
 const scoreEl = document.getElementById('score')!;
 function tickScore(dt: number) {
   const diff = Math.min(score / 100, 4);
   scoreF += (3 + diff * 2) * dt * 60 / 100;
+  const prev = score;
   score = Math.floor(scoreF);
   scoreEl.textContent = score + 'm';
+
+  // 마일스톤 체크
+  while (milestoneIdx < MILESTONES.length && score >= MILESTONES[milestoneIdx]) {
+    if (prev < MILESTONES[milestoneIdx]) { // 이번 프레임에 처음 통과
+      toast = { text: MILESTONES[milestoneIdx] + 'm !', alpha: 1, y: GH * 0.38 };
+      ait?.generateHapticFeedback({ type: 'confetti' }).catch(() => {});
+    }
+    milestoneIdx++;
+  }
 }
 
 // ── Obstacle Spawner ─────────────────────────────────────────────────────────
@@ -383,7 +410,7 @@ function spawnTick(dt: number) {
   if (dirChangeGrace > 0) dirChangeGrace = Math.max(0, dirChangeGrace - dt / 3);
   const diff = Math.min(score / 100, 4);
   const baseInterval = score < 30
-    ? Math.max(0.25, 1.2 - diff * 0.42)
+    ? Math.max(0.22, 1.05 - diff * 0.42)
     : Math.max(0.14, 1.0 - diff * 0.42);
   const interval = baseInterval * (1 + dirChangeGrace * 0.8); // grace 중 최대 80% 간격 증가
   obsTimer += dt;
@@ -526,7 +553,7 @@ function drawDirHint() {
   ctx.font = `900 ${sz}px "Space Grotesk", sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  const arrow = spawnDir === 'left' ? '→' : spawnDir === 'right' ? '←' : spawnDir === 'top' ? '↓' : '↑';
+  const arrow = spawnDir === 'left' ? '←' : spawnDir === 'right' ? '→' : spawnDir === 'top' ? '↓' : '↑';
   ctx.fillText(arrow, W / 2, GH / 2);
   ctx.restore();
   dirHintAlpha = Math.max(0, dirHintAlpha - 0.03);
@@ -587,13 +614,16 @@ function loop(ts: number) {
     }
 
     if (drag) hintAlpha = 0;
+    if (invincibleT > 0) invincibleT = Math.max(0, invincibleT - dt);
 
-    if (obstacles.some(o => collidesObs(player, o))) {
+    if (invincibleT <= 0 && obstacles.some(o => collidesObs(player, o))) {
       explode(player.x, player.y);
       ait?.generateHapticFeedback({ type: 'error' });
       state = S.DEAD; deadT = 0;
     }
 
+    const showPlayer = invincibleT <= 0 || Math.floor(invincibleT * 8) % 2 === 0;
+    updateToast(dt);
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.translate(shakeX, shakeY);
@@ -601,7 +631,8 @@ function loop(ts: number) {
     drawObs();
     drawDirChangeFlash();
     drawDirHint();
-    drawDot(player.x, player.y, player.r);
+    drawToast();
+    if (showPlayer) drawDot(player.x, player.y, player.r);
     ctx.restore();
     drawControlArea();
   }
@@ -634,6 +665,8 @@ function startGame() {
   score = 0; scoreF = 0;
   obsTimer = 0; hintAlpha = 1;
   gameTime = 0; nextDirChange = 15;
+  milestoneIdx = 0; toast = null;
+  invincibleT = 0; hasContinued = false;
   spawnDir = 'left';
   shakeIntensity = 0;
   colorIdx = 0; gameColor = COLORS[0]; applyColor();
@@ -647,7 +680,21 @@ function startGame() {
 
 async function showGameOver() {
   document.getElementById('goScore')!.textContent = String(score);
-  updateRetryBtn();
+  document.getElementById('continueBtn')!.style.display = hasContinued ? 'none' : '';
+  const best = loadBest();
+  const goBestEl = document.getElementById('goBest')!;
+  if (score > best) {
+    saveBest(score);
+    goBestEl.textContent = 'NEW BEST!';
+    goBestEl.className = 'newbest';
+  } else if (best > 0) {
+    const diff = best - score;
+    goBestEl.textContent = diff > 0 ? `BEST ${best}m · ${diff}m 남았어요` : `BEST ${best}m`;
+    goBestEl.className = '';
+  } else {
+    goBestEl.textContent = '';
+    goBestEl.className = '';
+  }
   document.getElementById('gameOver')!.classList.add('show');
   try {
     const result = await ait?.submitGameCenterLeaderBoardScore({ score: String(score) });
@@ -666,31 +713,6 @@ function resetToIntro() {
 // ── 광고 ─────────────────────────────────────────────────────────────────────
 let adLoaded = false;
 
-function todayStr() {
-  return new Date().toISOString().slice(0, 10); // 'YYYY-MM-DD'
-}
-function loadFreeRetries(): number {
-  const saved = localStorage.getItem(getRetriesKey());
-  const lastDate = localStorage.getItem(getRetriesDateKey());
-  if (lastDate !== todayStr()) {
-    localStorage.setItem(getRetriesKey(), '3');
-    localStorage.setItem(getRetriesDateKey(), todayStr());
-    return 3;
-  }
-  return saved !== null ? parseInt(saved, 10) : 3;
-}
-function saveFreeRetries(n: number) {
-  localStorage.setItem(getRetriesKey(), String(n));
-  localStorage.setItem(getRetriesDateKey(), todayStr());
-}
-
-let freeRetries = loadFreeRetries();
-
-const retryBtn = document.getElementById('retryBtn')!;
-function updateRetryBtn() {
-  retryBtn.textContent = freeRetries > 0 ? '다시 도전' : '(광고 보고) 다시 도전';
-}
-
 async function preloadAd() {
   if (!AdMobPlugin) return;
   try {
@@ -699,47 +721,61 @@ async function preloadAd() {
   } catch (e) { console.warn('광고 로드 실패:', e); }
 }
 
-async function showAitAd() {
-  // AIT 환경 (토스 앱): 리워드 전면광고 우선
+// 이어하기: 점수·상태 유지, 장애물 클리어, 무적 2초 + grace period (한 판 1회 제한)
+let hasContinued = false;
+
+function continueGame() {
+  hasContinued = true;
+  document.getElementById('gameOver')!.classList.remove('show');
+  obstacles = []; particles = [];
+  obsTimer = 0;
+  dirChangeGrace = 1.5;
+  invincibleT = 2.0;
+  resetPlayer();
+  state = S.PLAY;
+  preloadAitAd();
+  preloadAd();
+}
+
+async function showAitAd(onComplete: () => void) {
+  // AIT 환경 (토스 앱): 전면광고 우선
   if (ait && aitAdLoaded) {
     aitAdLoaded = false;
     ait.showFullScreenAd({
       options: { adGroupId: AIT_AD_GROUP_ID },
       onEvent: (event) => {
         if (event.type === 'dismissed') {
-          document.getElementById('gameOver')!.classList.remove('show');
-          resetToIntro();
+          onComplete();
           preloadAitAd();
         } else if (event.type === 'failedToShow') {
-          showAdFallback();
+          showAdFallback(onComplete);
         }
       },
-      onError: () => { showAdFallback(); },
+      onError: () => { showAdFallback(onComplete); },
     });
     return;
   }
 
   // AdMob (Android Capacitor)
-  if (!AdMobPlugin || !InterstitialEvents || !adLoaded) { showAdFallback(); return; }
+  if (!AdMobPlugin || !InterstitialEvents || !adLoaded) { showAdFallback(onComplete); return; }
   adLoaded = false;
   try {
     const dismissed = await AdMobPlugin.addListener(InterstitialEvents.Dismissed, () => {
-      document.getElementById('gameOver')!.classList.remove('show');
-      resetToIntro();
+      onComplete();
       preloadAd();
       dismissed.remove();
     });
     const failed = await AdMobPlugin.addListener(InterstitialEvents.FailedToShow, () => {
-      showAdFallback();
+      showAdFallback(onComplete);
       failed.remove();
       dismissed.remove();
     });
     await AdMobPlugin.showInterstitial();
-  } catch (e) { console.warn('광고 표시 실패:', e); showAdFallback(); }
+  } catch (e) { console.warn('광고 표시 실패:', e); showAdFallback(onComplete); }
 }
 
 let adFallbackInterval: ReturnType<typeof setInterval> | null = null;
-function showAdFallback() {
+function showAdFallback(onComplete: () => void) {
   const el = document.getElementById('adScreen')!;
   el.classList.add('show');
   let cnt = 5;
@@ -750,24 +786,19 @@ function showAdFallback() {
     if (cnt <= 0) {
       clearInterval(adFallbackInterval!);
       el.classList.remove('show');
-      document.getElementById('gameOver')!.classList.remove('show');
-      resetToIntro();
+      onComplete();
     }
   }, 1000);
 }
 
 // ── 버튼 ─────────────────────────────────────────────────────────────────────
 document.getElementById('startBtn')!.addEventListener('click', startZoom);
-retryBtn.addEventListener('click', () => {
-  if (freeRetries > 0) {
-    freeRetries--;
-    saveFreeRetries(freeRetries);
-    updateRetryBtn();
-    document.getElementById('gameOver')!.classList.remove('show');
-    resetToIntro();
-  } else {
-    showAitAd();
-  }
+document.getElementById('continueBtn')!.addEventListener('click', () => {
+  showAitAd(continueGame);
+});
+document.getElementById('retryBtn')!.addEventListener('click', () => {
+  document.getElementById('gameOver')!.classList.remove('show');
+  resetToIntro();
 });
 document.getElementById('leaderboardBtn')!.addEventListener('click', async () => {
   try {
