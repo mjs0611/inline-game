@@ -1,130 +1,184 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700;900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;500;700;900&family=Outfit:wght@400;600;900&display=swap');
 
-:root { --game-color: #000; }
+:root {
+  --game-color: #3182f6;
+  --bg-color: #f5f7f9;
+  --toss-blue: #3182f6;
+  --glass-bg: rgba(255, 255, 255, 0.9);
+  --text-primary: #191f28;
+  --text-secondary: #8b95a1;
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-html, body { width: 100%; height: 100%; background: #fff; overflow: hidden; }
-body { font-family: 'Space Grotesk', -apple-system, BlinkMacSystemFont, sans-serif; }
 
-#gameCanvas { position: fixed; top: 0; left: 0; touch-action: none; }
-
-/* ── Intro ── */
-#intro {
-  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center;
-  pointer-events: none; z-index: 10;
-  transition: opacity 0.2s;
-}
-#intro.hidden { opacity: 0; pointer-events: none; }
-#gameTitle {
-  font-size: clamp(44px, 11vw, 72px);
-  font-weight: 900; letter-spacing: -4px; color: #000; margin-bottom: 6px;
-}
-#gameSub { font-size: 10px; letter-spacing: 5px; color: #bbb; margin-bottom: 64px; text-transform: uppercase; }
-#startBtn {
-  pointer-events: all;
-  background: #000; color: #fff; border: none;
-  padding: 18px 60px; font-size: 13px;
-  font-weight: 700; letter-spacing: 3px;
-  border-radius: 0; cursor: pointer;
-  font-family: inherit;
-  transition: transform 0.1s;
-}
-#startBtn:active { transform: scale(0.95); }
-
-/* ── Score ── */
-#score {
-  position: fixed;
-  top: max(18px, env(safe-area-inset-top, 18px));
-  left: max(20px, env(safe-area-inset-left, 20px));
-  font-size: 18px; font-weight: 700; letter-spacing: 1px; color: #000;
-  z-index: 10; display: none;
-}
-
-/* ── Game Over ── */
-#gameOver {
-  position: fixed; top: 0; left: 0;
+html, body {
   width: 100%; height: 100%;
-  background: rgba(255,255,255,0.97);
-  display: none; flex-direction: column;
-  align-items: center; justify-content: center;
-  z-index: 20;
+  background: #ffffff; color: #000000;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  overflow: hidden; user-select: none;
 }
-#gameOver.show { display: flex; }
-#goLabel { font-size: 10px; letter-spacing: 5px; color: #bbb; margin-bottom: 20px; text-transform: uppercase; }
-#goScore {
-  font-size: clamp(88px, 24vw, 140px);
-  font-weight: 900; letter-spacing: -6px; color: #000;
-  line-height: 1; margin-bottom: 4px;
+
+canvas { display: block; width: 100%; height: 100%; position: fixed; top: 0; left: 0; }
+
+/* HUD */
+#hud {
+  position: absolute; top: 0; left: 0; width: 100%;
+  padding: env(safe-area-inset-top, 24px) 24px 0;
+  display: flex; align-items: center; gap: 12px;
+  pointer-events: none; z-index: 10;
 }
-#goUnit { font-size: 11px; letter-spacing: 4px; color: #ccc; margin-bottom: 12px; text-transform: uppercase; }
-#goBest { font-size: 11px; letter-spacing: 2px; color: #bbb; margin-bottom: 48px; text-transform: uppercase; min-height: 16px; }
-#goBest.newbest { color: #000; font-weight: 700; letter-spacing: 3px; }
-.goBtn {
-  width: 230px; padding: 17px; margin: 5px;
-  border-radius: 0; font-size: 13px;
-  font-weight: 700; letter-spacing: 1px;
-  cursor: pointer; border: none;
+#score {
+  font-size: 24px;
+  font-weight: 800;
+  color: #191f28;
+  visibility: hidden;
+  line-height: 1;
+}
+#coinCountHUD { visibility: hidden; }
+#score span { font-size: 13px; color: #8b95a1; margin-left: 2px; }
+.coin-hud {
+  font-family: 'Outfit', sans-serif;
+  font-size: 18px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: #191f28;
+  line-height: 1;
+}
+.coin-img { width: 16px; height: 16px; }
+
+#itemHUD {
+  position: absolute; top: 60px; right: 16px;
+  display: flex; flex-direction: column; gap: 6px;
+  pointer-events: none; z-index: 10;
+}
+.powerup-icon {
+  width: 32px; height: 32px; background: var(--glass-bg);
+  backdrop-filter: blur(10px); border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  border: 1px solid rgba(0,0,0,0.05);
+  animation: pulseIcon 1.5s infinite;
+}
+
+/* UI Panels */
+#intro, #shopOverlay, #gameOver, #adScreen {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: #ffffff; z-index: 20; transition: 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+#intro.hidden, #shopOverlay:not(.show), #gameOver:not(.show), #adScreen:not(.show) {
+  opacity: 0; pointer-events: none; transform: scale(0.95);
+}
+
+/* Intro */
+#gameTitle { font-size: 56px; font-weight: 700; letter-spacing: -1px; margin-bottom: 2px; }
+#gameSub { color: #8b95a1; font-weight: 400; font-size: 15px; margin-bottom: 56px; }
+.intro-btns { display: flex; flex-direction: column; gap: 12px; width: 100%; padding: 0 40px; max-width: 400px; }
+
+/* Buttons */
+button {
+  background: #f2f4f6; color: #4e5968; border: none; border-radius: 12px;
+  padding: 16px; font-size: 16px; font-weight: 600; cursor: pointer;
+  transition: 0.2s; 
+  -webkit-appearance: none;
+  appearance: none;
   font-family: inherit;
-  transition: transform 0.1s;
 }
-.goBtn:active { transform: scale(0.96); }
-.goBtn.primary { background: #000; color: #fff; }
-.goBtn.secondary { background: #fff; color: #000; border: 2px solid #000; }
-#leaderboardBtn { display: none; }
+button:active { transform: scale(0.97); opacity: 0.9; }
+#startBtn { background: #000000; color: #ffffff; }
+#shopBtn { background: #f2f4f6; color: #4e5968; }
 
-/* ── Direction change pulse ── */
+/* Shop Modal */
+#shopOverlay {
+  position: absolute; inset: 0;
+  background: rgba(255,255,255,0.6); backdrop-filter: blur(15px);
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+  z-index: 30;
+}
+#shopOverlay.show { display: flex; }
+#shopBox {
+  width: min(360px, 92vw); max-height: 85vh;
+  background: #fff; border-radius: 32px; display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.15);
+}
+#shopHeader {
+  padding: 20px 24px; border-bottom: 1px solid rgba(0,0,0,0.05);
+  display: flex; justify-content: space-between; align-items: center;
+}
+#shopHeader h2 { font-size: 20px; font-weight: 900; letter-spacing: 1px; margin: 0; }
+.coin-balance { font-weight: 800; display: flex; align-items: center; gap: 6px; font-family: 'Outfit', sans-serif; }
+.shop-content { padding: 20px; overflow-y: auto; flex: 1; }
+.sku-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.sku-item {
+  border-radius: 16px; background: rgba(0,0,0,0.03);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; padding: 14px 8px 12px;
+  border: 2px solid transparent; cursor: pointer; transition: all 0.2s;
+  position: relative; min-height: 100px;
+}
+.sku-item img { width: 56px; height: 56px; object-fit: contain; flex-shrink: 0; }
+.skin-svg { flex-shrink: 0; }
+.sku-item.active { border-color: var(--toss-blue); background: rgba(49,130,246,0.05); }
+.sku-item.locked { filter: grayscale(1); opacity: 0.5; }
+.sku-price {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 11px; font-weight: 800; color: #6b7684;
+}
+.sku-price .coin-img { width: 10px; height: 10px; }
+.shop-footer { padding: 16px 24px; border-top: 1px solid rgba(0,0,0,0.05); }
+#shopCloseBtn { width: 100%; background: #f2f4f6; color: #4e5968; }
+
+/* Game Over */
+#gameOver { background: rgba(255,255,255,0.98); backdrop-filter: blur(20px); }
+#goLabel { font-size: 15px; font-weight: 700; color: #f04452; letter-spacing: 2px; margin-bottom: 8px; }
+#goScore { font-size: 80px; font-weight: 900; line-height: 1; }
+#goUnit { color: var(--text-secondary); font-weight: 700; font-size: 13px; margin-bottom: 24px; }
+.go-coins { margin-bottom: 40px; font-weight: 700; color: #4e5968; }
+.goBtn { width: calc(100% - 80px); max-width: 320px; margin-bottom: 12px; }
+.goBtn.primary { background: #333; color: #fff; }
+.goBtn.gold { background: #f5a623; color: #fff; }
+#goBest { font-weight: 700; margin-bottom: 24px; font-size: 14px; color: var(--toss-blue); }
+
+/* Animation Overlay */
 #dirPulse {
-  position: fixed; top: 0; left: 0; width: 100%; height: 60%;
-  pointer-events: none; z-index: 5;
-  border: 0px solid var(--game-color);
-  opacity: 0;
-  box-sizing: border-box;
+  position: absolute; inset: 0; pointer-events: none; z-index: 5;
+  border: 0 solid var(--game-color); opacity: 0;
 }
-#dirPulse.pulse {
-  animation: dirPulse 0.55s ease-out forwards;
+#dirPulse.pulse { animation: pulseOut 0.6s ease-out; }
+
+@keyframes pulseOut {
+  0% { border-width: 0px; opacity: 0.5; }
+  100% { border-width: 30px; opacity: 0; }
 }
-@keyframes dirPulse {
-  0%   { border-width: 6px; opacity: 0.55; }
-  60%  { border-width: 3px; opacity: 0.2; }
-  100% { border-width: 0px; opacity: 0; }
+@keyframes pulseIcon {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.1); }
 }
 
-/* ── Close confirm ── */
+/* Close Confirm */
 #closeConfirm {
-  position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-  background: rgba(0,0,0,0.5);
-  display: none; align-items: center; justify-content: center;
-  z-index: 50;
+  position: absolute; inset: 0; z-index: 100; display: none;
+  background: rgba(0,0,0,0.4); backdrop-filter: blur(4px);
+  align-items: center; justify-content: center;
 }
 #closeConfirm.show { display: flex; }
 #closeBox {
-  background: #fff; padding: 32px 28px; min-width: 260px;
-  display: flex; flex-direction: column; align-items: center; gap: 20px;
+  background: #fff; width: 280px; border-radius: 24px; padding: 24px;
+  text-align: center; box-shadow: 0 12px 40px rgba(0,0,0,0.2);
 }
-#closeMsg { font-size: 15px; font-weight: 700; color: #000; letter-spacing: -0.5px; }
-.closeBtns { display: flex; gap: 10px; width: 100%; }
-#closeNo, #closeYes {
-  flex: 1; padding: 14px; border: none; font-family: inherit;
-  font-size: 13px; font-weight: 700; letter-spacing: 1px; cursor: pointer;
-}
-#closeNo { background: #f3f3f3; color: #000; }
-#closeYes { background: #000; color: #fff; }
+#closeMsg { font-size: 18px; font-weight: 700; margin-bottom: 24px; }
+.closeBtns { display: flex; gap: 12px; }
+.closeBtns button { flex: 1; padding: 14px; border-radius: 12px; }
+#closeNo { background: #f2f4f6; color: #4e5968; }
+#closeYes { background: #f04452; color: #fff; }
 
-/* ── Ad fallback ── */
-#adScreen {
-  position: fixed; top: 0; left: 0;
-  width: 100%; height: 100%; background: #fff;
-  display: none; flex-direction: column;
-  align-items: center; justify-content: center;
-  z-index: 30;
-}
-#adScreen.show { display: flex; }
-#adTag { font-size: 9px; letter-spacing: 5px; color: #ccc; margin-bottom: 20px; text-transform: uppercase; }
+/* Ad Screen */
+#adScreen { flex-direction: column; background: #000; color: #fff; }
 #adBox {
-  width: min(300px, 80vw); height: 200px;
-  background: #f3f3f3; border-radius: 0;
-  display: flex; align-items: center; justify-content: center; margin-bottom: 20px;
+  width: 120px; height: 120px; border: 4px solid #fff; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 48px; font-weight: 900; margin: 32px 0;
 }
-#adCount { font-size: 56px; font-weight: 900; color: #ddd; }
-#adSub { font-size: 11px; color: #ccc; letter-spacing: 2px; }
+#adTag { font-size: 12px; opacity: 0.6; letter-spacing: 2px; }

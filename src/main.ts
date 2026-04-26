@@ -1,5 +1,6 @@
 // ── AIT (리더보드 + 전면광고, 토스 앱 환경에서만 동작) ──────────────────────────────
 const AIT_AD_GROUP_ID = 'ait.v2.live.fb0c3b1cbf34487a';
+const AIT_REWARD_AD_GROUP_ID = 'ait.v2.live.86b7cf1bbf014040';
 
 type AitModule = {
   submitGameCenterLeaderBoardScore: typeof import('@apps-in-toss/web-framework').submitGameCenterLeaderBoardScore;
@@ -11,6 +12,7 @@ type AitModule = {
 };
 let ait: AitModule | null = null;
 let aitAdLoaded = false;
+let aitRewardAdLoaded = false;
 
 import('@apps-in-toss/web-framework').then((m) => {
   ait = {
@@ -23,6 +25,7 @@ import('@apps-in-toss/web-framework').then((m) => {
   };
   document.getElementById('leaderboardBtn')!.style.display = 'block';
   preloadAitAd();
+  preloadAitRewardAd();
   // 유저 식별자 조회 및 저장 (16번 체크리스트)
   m.getUserKeyForGame().catch(() => {});
 }).catch(() => {});
@@ -37,6 +40,16 @@ function preloadAitAd() {
   });
 }
 
+function preloadAitRewardAd() {
+  if (!ait) return;
+  aitRewardAdLoaded = false;
+  ait.loadFullScreenAd({
+    options: { adGroupId: AIT_REWARD_AD_GROUP_ID },
+    onEvent: () => { aitRewardAdLoaded = true; },
+    onError: () => { aitRewardAdLoaded = false; },
+  });
+}
+
 // ── AdMob ────────────────────────────────────────────────────────────────────
 const ADMOB_INTERSTITIAL_ID = 'ca-app-pub-4557219410513767/2140145076';
 type AdMobType = typeof import('@capacitor-community/admob').AdMob;
@@ -46,13 +59,34 @@ let InterstitialEvents: InterstitialEventsType | null = null;
 import('@capacitor-community/admob').then((m) => {
   AdMobPlugin = m.AdMob;
   InterstitialEvents = m.InterstitialAdPluginEvents;
-  AdMobPlugin.initialize({ requestTrackingAuthorization: false }).then(() => preloadAd()).catch(() => {});
+  AdMobPlugin.initialize({}).then(() => preloadAd()).catch(() => {});
 }).catch(() => {});
 
-// ── Color ─────────────────────────────────────────────────────────────────────
-const COLORS = ['#000000', '#FF2D78', '#00F0FF', '#39FF14', '#FFE600', '#BF00FF', '#FF6B00'];
+// ── Constants ────────────────────────────────────────────────────────────────
+const COLORS = ['#191F28', '#F04452', '#FFB300', '#3182F6', '#00C471', '#8B95A1'];
 let colorIdx = 0;
 let gameColor = COLORS[0];
+
+// ── Persistence Keys ──────────────────────────────────────────────────────────
+const BEST_KEY = 'bestScore';
+const COIN_KEY = 'totalCoins';
+const OWNED_SKINS_KEY = 'ownedSkins';
+const EQUIPPED_SKIN_KEY = 'equippedSkin';
+
+// ── Game State Variables ────────────────────────────────────────────────────────
+let score = 0, scoreF = 0;
+let totalCoins = parseInt(localStorage.getItem(COIN_KEY) ?? '0', 10);
+let ownedSkins = JSON.parse(localStorage.getItem(OWNED_SKINS_KEY) ?? '["white"]');
+let equippedIdx = parseInt(localStorage.getItem(EQUIPPED_SKIN_KEY) ?? '0', 10);
+let sessionCoins = 0;
+
+let spawnDir: 'left'|'top'|'right'|'bottom' = 'left';
+const MILESTONES = [50, 100, 200, 300, 500, 1000];
+let dirChangeGrace = 0;
+let obstacles: Obs[] = [];
+let specials: Special[] = [];
+let pickups: Pickup[] = [];
+let milestoneIdx = 0;
 
 function colorWithAlpha(hex: string, a: number): string {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -66,6 +100,114 @@ function bgAlpha(a: number) { return `rgba(255,255,255,${a})`; }
 function applyColor() {
   document.documentElement.style.setProperty('--game-color', gameColor);
 }
+
+// ── Assets ───────────────────────────────────────────────────────────────────
+const imgPlayerDefault = '/assets/player_default.png';
+const imgPlayerSkins   = '/assets/player_skins.png';
+const imgObsAssets     = '/assets/obs_assets.png';
+const imgItemAssets    = '/assets/item_assets.png';
+
+const ASSETS = {
+  player: new Image(),
+  skins:  new Image(),
+  coin:   new Image(),
+  shield: new Image(),
+  slowmo: new Image(),
+  mine:   new Image(),
+  blade:  new Image(),
+};
+ASSETS.player.src = imgPlayerDefault;
+ASSETS.skins.src  = imgPlayerSkins;
+ASSETS.coin.src   = '/assets/coin.png';
+ASSETS.shield.src = '/assets/shield.png';
+ASSETS.slowmo.src = '/assets/slowmo.png';
+ASSETS.mine.src   = '/assets/mine.png';
+ASSETS.blade.src  = '/assets/blade.png';
+
+type SkinDef = { id: string; name: string; price: number; sx: number; sy: number; sw: number; sh: number };
+const SKINS: SkinDef[] = [
+  { id: 'white', name: 'WHITE',  price: 0,   sx: 0, sy: 0, sw: 1024, sh: 1024 },
+  { id: 'ufo',   name: 'UFO',    price: 300, sx: 0, sy: 256, sw: 256,  sh: 256  },
+  { id: 'rocket',name: 'ROCKET', price: 800, sx: 0, sy: 512, sw: 256,  sh: 256 },
+];
+// Note: player_skins.png is a 1024x1024 grid with UFO at (0,0,512,512) and Rocket at (512,0,512,512).
+// player_default.png is a single 1024x1024 image.
+
+// ── Persistence Helpers ──────────────────────────────────────────────────────
+function loadBest(): number { return parseInt(localStorage.getItem(BEST_KEY) ?? '0', 10); }
+function saveBest(n: number) { localStorage.setItem(BEST_KEY, String(n)); }
+function saveTotalCoins(n: number) { localStorage.setItem(COIN_KEY, String(n)); }
+function saveOwnedSkins(arr: string[]) { localStorage.setItem(OWNED_SKINS_KEY, JSON.stringify(arr)); }
+function saveEquippedIdx(i: number) { localStorage.setItem(EQUIPPED_SKIN_KEY, String(i)); }
+
+// ── Shop UI ──────────────────────────────────────────────────────────────────
+function skinPreviewHTML(skin: SkinDef): string {
+  if (skin.id === 'white') {
+    return `<svg width="52" height="52" viewBox="0 0 52 52" class="skin-svg">
+      <circle cx="26" cy="26" r="21" fill="#191F28" stroke="#fff" stroke-width="3"/>
+    </svg>`;
+  }
+  const PREVIEW = 56;
+  const scale = PREVIEW / skin.sw;
+  const bgW = Math.round(1024 * scale);
+  const bgH = Math.round(1024 * scale);
+  const bgX = Math.round(-skin.sx * scale);
+  const bgY = Math.round(-skin.sy * scale);
+  return `<div class="skin-sprite" style="width:${PREVIEW}px;height:${PREVIEW}px;background-image:url(${imgPlayerSkins});background-size:${bgW}px ${bgH}px;background-position:${bgX}px ${bgY}px;background-repeat:no-repeat;flex-shrink:0;"></div>`;
+}
+
+function updateShopUI() {
+  document.getElementById('shopCoinVal')!.textContent = String(totalCoins);
+  const grid = document.getElementById('playerSkinsGrid')!;
+  grid.innerHTML = '';
+
+  SKINS.forEach((skin, idx) => {
+    const isOwned = ownedSkins.includes(skin.id);
+    const isEquipped = equippedIdx === idx;
+
+    const div = document.createElement('div');
+    div.className = `sku-item ${isEquipped ? 'active' : ''} ${!isOwned ? 'locked' : ''}`;
+
+    const priceHTML = isOwned ? '' : `<div class="sku-price"><img src="/assets/coin.png" class="coin-img"> ${skin.price}</div>`;
+    const checkHTML = isEquipped ? `<div style="position:absolute;top:-6px;right:-6px;background:var(--toss-blue);color:#fff;width:20px;height:20px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;">✓</div>` : '';
+
+    div.innerHTML = `${skinPreviewHTML(skin)}${priceHTML}${checkHTML}`;
+
+    div.addEventListener('click', () => {
+      if (isOwned) {
+        equippedIdx = idx;
+        saveEquippedIdx(idx);
+        updateShopUI();
+        ait?.generateHapticFeedback({ type: 'success' });
+      } else if (totalCoins >= skin.price) {
+        totalCoins -= skin.price;
+        saveTotalCoins(totalCoins);
+        ownedSkins.push(skin.id);
+        saveOwnedSkins(ownedSkins);
+        equippedIdx = idx;
+        saveEquippedIdx(idx);
+        updateShopUI();
+        ait?.generateHapticFeedback({ type: 'success' });
+      } else {
+        ait?.generateHapticFeedback({ type: 'error' });
+        div.style.transform = 'translateX(-4px)';
+        setTimeout(() => div.style.transform = 'translateX(4px)', 50);
+        setTimeout(() => div.style.transform = '', 100);
+      }
+    });
+    grid.appendChild(div);
+  });
+}
+
+function openShop() {
+  updateShopUI();
+  document.getElementById('shopOverlay')!.classList.add('show');
+}
+function closeShop() {
+  document.getElementById('shopOverlay')!.classList.remove('show');
+}
+document.getElementById('shopBtn')!.addEventListener('click', openShop);
+document.getElementById('shopCloseBtn')!.addEventListener('click', closeShop);
 
 // ── Canvas ──────────────────────────────────────────────────────────────────
 const canvas = document.getElementById('gameCanvas') as HTMLCanvasElement;
@@ -99,56 +241,71 @@ function ptSegDist(x1: number, y1: number, x2: number, y2: number, px: number, p
   return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
-// ── Obstacles ────────────────────────────────────────────────────────────────
+// ── Obstacles (원본: dot / line / cross) ──────────────────────────────────────
 type DotObs   = { k: 'dot';   x: number; y: number; r: number;  vx: number; vy: number };
 type LineObs  = { k: 'line';  x1: number; y1: number; x2: number; y2: number; lw: number; vx: number; vy: number };
 type CrossObs = { k: 'cross'; x: number; y: number; size: number; vx: number; vy: number };
 type Obs = DotObs | LineObs | CrossObs;
 
-let obstacles: Obs[] = [];
-let spawnDir: 'left' | 'top' | 'right' | 'bottom' = 'left';
+// ── Specials (신규: mine / blade / laser / sentry) ────────────────────────────
+type SpecialType = 'mine' | 'laser' | 'blade' | 'sentry';
+type Special = {
+  k: SpecialType;
+  x: number; y: number;
+  vx: number; vy: number;
+  r: number;
+  rot: number; vRot: number;
+  w?: number; h?: number;
+  warning: number;
+  pulseT?: number;
+  stopX?: number; stopY?: number;
+};
 
+type PickupType = 'coin' | 'shield' | 'slowmo';
+type Pickup = {
+  k: PickupType;
+  x: number; y: number;
+  r: number;
+  life: number;
+};
+
+// ── makeObs: 원본 dot/line/cross ──────────────────────────────────────────────
 function makeObs(fullH: boolean, dir: 'left' | 'top' | 'right' | 'bottom' = 'left'): Obs | Obs[] {
-  const aH   = fullH ? H : GH;
-  const pad  = 35;
+  const aH  = fullH ? H : GH;
+  const pad = 35;
   const diff = fullH ? 0 : Math.min(score / 100, 4);
   const earlyEase = score < 30 ? 0.9 : 1.0;
-  const graceMult = 1 - dirChangeGrace * 0.35; // grace 중 최대 35% 속도 감소
-  const spd  = rand((5.5 + diff * 2.2) * earlyEase * graceMult, (8 + diff * 2.2) * earlyEase * graceMult);
+  const graceMult = 1 - dirChangeGrace * 0.35;
+  const spd = rand((5.5 + diff * 2.2) * earlyEase * graceMult, (8 + diff * 2.2) * earlyEase * graceMult);
 
   if (dir === 'top') {
-    // 위에서 아래로
     const x = rand(pad, W - pad);
     const types = ['dot_s', 'dot_l', 'lv_s', 'lv_l', 'diag_s', 'cross'] as const;
     const type  = types[Math.floor(Math.random() * types.length)];
     switch (type) {
       case 'dot_s':  return { k: 'dot',  x, y: -20, r: rand(4, 8),   vx: 0, vy: spd };
       case 'dot_l':  return { k: 'dot',  x, y: -30, r: rand(11, 20), vx: 0, vy: spd };
-      case 'lv_s':   { const h = rand(20, 45); return { k: 'line', x1: x, y1: -h, x2: x, y2: h, lw: 2, vx: 0, vy: spd }; }
+      case 'lv_s':   { const h = rand(20, 45);  return { k: 'line', x1: x, y1: -h, x2: x, y2: h, lw: 2, vx: 0, vy: spd }; }
       case 'lv_l':   { const h = rand(55, 100); return { k: 'line', x1: x, y1: -h, x2: x, y2: h, lw: 2, vx: 0, vy: spd }; }
-      case 'diag_s': { const h = rand(20, 35); return { k: 'line', x1: x - h, y1: -h, x2: x + h, y2: h, lw: 2, vx: 0, vy: spd }; }
+      case 'diag_s': { const h = rand(20, 35);  return { k: 'line', x1: x - h, y1: -h, x2: x + h, y2: h, lw: 2, vx: 0, vy: spd }; }
       case 'cross':  return { k: 'cross', x, y: -20, size: rand(14, 24), vx: 0, vy: spd };
     }
   }
-
   if (dir === 'bottom') {
-    // 아래에서 위로
     const x = rand(pad, W - pad);
     const types = ['dot_s', 'dot_l', 'lv_s', 'lv_l', 'diag_s', 'cross'] as const;
     const type  = types[Math.floor(Math.random() * types.length)];
     switch (type) {
       case 'dot_s':  return { k: 'dot',  x, y: GH + 20, r: rand(4, 8),   vx: 0, vy: -spd };
       case 'dot_l':  return { k: 'dot',  x, y: GH + 30, r: rand(11, 20), vx: 0, vy: -spd };
-      case 'lv_s':   { const h = rand(20, 45); return { k: 'line', x1: x, y1: GH + h, x2: x, y2: GH - h, lw: 2, vx: 0, vy: -spd }; }
+      case 'lv_s':   { const h = rand(20, 45);  return { k: 'line', x1: x, y1: GH + h, x2: x, y2: GH - h, lw: 2, vx: 0, vy: -spd }; }
       case 'lv_l':   { const h = rand(55, 100); return { k: 'line', x1: x, y1: GH + h, x2: x, y2: GH - h, lw: 2, vx: 0, vy: -spd }; }
-      case 'diag_s': { const h = rand(20, 35); return { k: 'line', x1: x - h, y1: GH + h, x2: x + h, y2: GH - h, lw: 2, vx: 0, vy: -spd }; }
+      case 'diag_s': { const h = rand(20, 35);  return { k: 'line', x1: x - h, y1: GH + h, x2: x + h, y2: GH - h, lw: 2, vx: 0, vy: -spd }; }
       case 'cross':  return { k: 'cross', x, y: GH + 20, size: rand(14, 24), vx: 0, vy: -spd };
     }
   }
-
   if (dir === 'right') {
-    // 왼쪽에서 오른쪽으로
-    const y    = rand(pad, aH - pad);
+    const y = rand(pad, aH - pad);
     const types = ['dot_s', 'dot_l', 'lh_s', 'lh_l', 'lv_s', 'lv_l', 'diag_s', 'diag_l', 'cross', 'lh_gap'] as const;
     const type  = types[Math.floor(Math.random() * types.length)];
     switch (type) {
@@ -162,22 +319,18 @@ function makeObs(fullH: boolean, dir: 'left' | 'top' | 'right' | 'bottom' = 'lef
       case 'diag_l': { const h = rand(45, 80);  return { k: 'line', x1: -10 - h * 2, y1: y - h, x2: -10, y2: y + h, lw: 2, vx: spd, vy: 0 }; }
       case 'cross':  return { k: 'cross', x: -20, y, size: rand(14, 26), vx: spd, vy: 0 };
       case 'lh_gap': {
-        const gapCenter = rand(aH * 0.2, aH * 0.8);
-        const gapSize   = rand(28, 45);
-        const len = rand(60, 130);
+        const gapCenter = rand(aH * 0.2, aH * 0.8), gapSize = rand(28, 45), len = rand(60, 130);
         return [
-          { k: 'line', x1: -10 - len, y1: 0,              x2: -10, y2: gapCenter - gapSize, lw: 2, vx: spd, vy: 0 },
-          { k: 'line', x1: -10 - len, y1: gapCenter + gapSize, x2: -10, y2: aH,             lw: 2, vx: spd, vy: 0 },
+          { k: 'line', x1: -10 - len, y1: 0,                  x2: -10, y2: gapCenter - gapSize, lw: 2, vx: spd, vy: 0 },
+          { k: 'line', x1: -10 - len, y1: gapCenter + gapSize, x2: -10, y2: aH,                 lw: 2, vx: spd, vy: 0 },
         ] as Obs[];
       }
     }
   }
-
-  // 오른쪽에서 왼쪽으로 (기본 'left')
-  const y    = rand(pad, aH - pad);
+  // left (기본)
+  const y = rand(pad, aH - pad);
   const types = ['dot_s', 'dot_l', 'lh_s', 'lh_l', 'lv_s', 'lv_l', 'diag_s', 'diag_l', 'cross', 'lh_gap'] as const;
   const type  = types[Math.floor(Math.random() * types.length)];
-
   switch (type) {
     case 'dot_s':  return { k: 'dot',  x: W + 20, y, r: rand(4, 8),   vx: -spd, vy: 0 };
     case 'dot_l':  return { k: 'dot',  x: W + 30, y, r: rand(11, 20), vx: -spd, vy: 0 };
@@ -189,30 +342,81 @@ function makeObs(fullH: boolean, dir: 'left' | 'top' | 'right' | 'bottom' = 'lef
     case 'diag_l': { const h = rand(45, 80);  return { k: 'line', x1: W + 10, y1: y - h, x2: W + 10 + h * 2, y2: y + h, lw: 2, vx: -spd, vy: 0 }; }
     case 'cross':  return { k: 'cross', x: W + 20, y, size: rand(14, 26), vx: -spd, vy: 0 };
     case 'lh_gap': {
-      // 통로 있는 두 줄짜리 장애물 (통로가 좁아서 까다로움)
-      const gapCenter = rand(aH * 0.2, aH * 0.8);
-      const gapSize   = rand(28, 45);
-      const len = rand(60, 130);
+      const gapCenter = rand(aH * 0.2, aH * 0.8), gapSize = rand(28, 45), len = rand(60, 130);
       return [
-        { k: 'line', x1: W + 10, y1: 0,              x2: W + 10 + len, y2: gapCenter - gapSize, lw: 2, vx: -spd, vy: 0 },
-        { k: 'line', x1: W + 10, y1: gapCenter + gapSize, x2: W + 10 + len, y2: aH,             lw: 2, vx: -spd, vy: 0 },
+        { k: 'line', x1: W + 10, y1: 0,                  x2: W + 10 + len, y2: gapCenter - gapSize, lw: 2, vx: -spd, vy: 0 },
+        { k: 'line', x1: W + 10, y1: gapCenter + gapSize, x2: W + 10 + len, y2: aH,                 lw: 2, vx: -spd, vy: 0 },
       ] as Obs[];
     }
   }
+  // fallback
+  return { k: 'dot', x: W + 20, y, r: rand(4, 8), vx: -spd, vy: 0 };
 }
 
-function updateObs() {
+// ── makeSpecial: 신규 특수 장애물 ────────────────────────────────────────────
+function makeSpecial(dir: 'left' | 'top' | 'right' | 'bottom' = 'left'): Special {
+  const pad  = 40;
+  const diff = Math.min(score / 120, 5);
+  const graceMult = 1 - dirChangeGrace * 0.4;
+  const spd  = rand((6.0 + diff * 1.0) * graceMult, (8.0 + diff * 1.0) * graceMult);
+
+  let x = 0, y = 0, vx = 0, vy = 0;
+  if (dir === 'left')    { x = W + 50;               y = rand(pad, GH - pad); vx = -spd; }
+  else if (dir === 'right') { x = -50;               y = rand(pad, GH - pad); vx =  spd; }
+  else if (dir === 'top')   { x = rand(pad, W - pad); y = -50;               vy =  spd; }
+  else                      { x = rand(pad, W - pad); y = GH + 50;           vy = -spd; }
+
+  // 점수에 따라 등장 가능한 종류 해금
+  let types: SpecialType[];
+  if (score < 80)       types = ['mine', 'blade'];
+  else if (score < 200) types = ['mine', 'blade', 'laser'];
+  else                  types = ['mine', 'blade', 'laser', 'sentry'];
+  const k = types[Math.floor(Math.random() * types.length)];
+
+  const stopX = k === 'sentry' ? rand(W * 0.15, W * 0.85) : undefined;
+  const stopY = k === 'sentry' ? rand(pad, GH - pad) : undefined;
+  const laserLen = rand(60 + diff * 28, 160 + diff * 48);
+
+  return {
+    k, x, y, vx, vy,
+    r: k === 'mine' ? rand(8, 14) : k === 'blade' ? rand(20, 35) : 10,
+    rot: Math.random() * Math.PI * 2,
+    vRot: k === 'blade' ? 0.18 : 0,
+    w: k === 'laser' ? (vx !== 0 ? laserLen : 10) : 0,
+    h: k === 'laser' ? (vy !== 0 ? laserLen : 10) : 0,
+    warning: 0,
+    pulseT: k === 'sentry' ? 0 : undefined,
+    stopX, stopY,
+  };
+}
+
+function spawnPickup() {
+  const typeRoll = Math.random();
+  let k: PickupType = 'coin';
+  if (typeRoll > 0.92) k = 'shield';
+  else if (typeRoll > 0.85) k = 'slowmo';
+
+  pickups.push({
+    k,
+    x: rand(50, W - 50),
+    y: rand(50, GH - 50),
+    r: 20,
+    life: 8.0,
+  });
+}
+
+// ── 원본 장애물 업데이트 / 드로우 / 충돌 ───────────────────────────────────────
+function updateObs(dt: number) {
+  const s = dt * 60;
   for (const o of obstacles) {
-    if (o.k === 'dot' || o.k === 'cross') {
-      o.x += o.vx; o.y += o.vy;
-    } else {
-      o.x1 += o.vx; o.x2 += o.vx;
-      o.y1 += o.vy; o.y2 += o.vy;
-    }
+    if (o.k === 'dot' || o.k === 'cross') { o.x += o.vx * s; o.y += o.vy * s; }
+    else { o.x1 += o.vx * s; o.x2 += o.vx * s; o.y1 += o.vy * s; o.y2 += o.vy * s; }
   }
   obstacles = obstacles.filter(o => {
-    if (o.k === 'dot' || o.k === 'cross') return o.x > -200 && o.y < GH + 200 && o.x < W + 200 && o.y > -200;
-    return Math.min(o.x1, o.x2) > -200 && Math.max(o.x1, o.x2) < W + 200 && Math.min(o.y1, o.y2) > -200 && Math.max(o.y1, o.y2) < GH + 200;
+    if (o.k === 'dot' || o.k === 'cross')
+      return o.x > -200 && o.y < GH + 200 && o.x < W + 200 && o.y > -200;
+    return Math.min(o.x1, o.x2) > -200 && Math.max(o.x1, o.x2) < W + 200
+        && Math.min(o.y1, o.y2) > -200 && Math.max(o.y1, o.y2) < GH + 200;
   });
 }
 
@@ -235,19 +439,130 @@ function drawObs() {
 function collidesObs(dot: { x: number; y: number; r: number }, o: Obs): boolean {
   if (o.k === 'dot')  return Math.hypot(dot.x - o.x, dot.y - o.y) < dot.r + o.r;
   if (o.k === 'line') return ptSegDist(o.x1, o.y1, o.x2, o.y2, dot.x, dot.y) < dot.r + o.lw / 2 + 1;
-  // cross: check both arms
   const d1 = ptSegDist(o.x - o.size, o.y, o.x + o.size, o.y, dot.x, dot.y);
   const d2 = ptSegDist(o.x, o.y - o.size, o.x, o.y + o.size, dot.x, dot.y);
   return Math.min(d1, d2) < dot.r + 1.5;
 }
 
+// ── 특수 장애물 업데이트 / 드로우 / 충돌 ──────────────────────────────────────
+function updateSpecials(dt: number) {
+  for (const o of specials) {
+    o.rot += o.vRot;
+    if (o.k === 'blade') {
+      o.x += o.vx * dt * 60; o.y += o.vy * dt * 60;
+      if (o.y < 40 || o.y > GH - 40) { o.vy *= -1; o.y = clamp(o.y, 40, GH - 40); }
+    } else if (o.k === 'sentry') {
+      if (o.stopX !== undefined && o.stopY !== undefined) {
+        const dx = o.stopX - o.x, dy = o.stopY - o.y, dist = Math.hypot(dx, dy);
+        if (dist > 4) {
+          o.vx += (dx / dist) * 1.2; o.vy += (dy / dist) * 1.2;
+          const spd = Math.hypot(o.vx, o.vy), maxSpd = Math.min(spd, dist * 0.18);
+          if (spd > 0) { o.vx = o.vx / spd * maxSpd; o.vy = o.vy / spd * maxSpd; }
+        } else { o.vx = 0; o.vy = 0; o.x = o.stopX; o.y = o.stopY; }
+      } else { o.vx *= 0.92; o.vy *= 0.92; }
+      o.x += o.vx * dt * 60; o.y += o.vy * dt * 60;
+      if (o.pulseT !== undefined) { o.pulseT += dt; if (o.pulseT > 1.8) o.pulseT = 0; }
+    } else {
+      o.x += o.vx * dt * 60; o.y += o.vy * dt * 60;
+    }
+  }
+  specials = specials.filter(o => o.x > -300 && o.x < W + 300 && o.y > -300 && o.y < GH + 300);
+}
+
+function drawSpecials() {
+  for (const o of specials) {
+    ctx.save();
+    ctx.translate(o.x, o.y);
+    ctx.rotate(o.rot);
+    if (o.k === 'mine') {
+      const s = 1 + Math.sin(Date.now() * 0.008) * 0.08;
+      const mr = o.r * s;
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        ctx.moveTo(Math.cos(a) * mr, Math.sin(a) * mr);
+        ctx.lineTo(Math.cos(a) * (mr + mr * 0.35), Math.sin(a) * (mr + mr * 0.35));
+      }
+      ctx.strokeStyle = '#191F28'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.stroke();
+      ctx.beginPath(); ctx.arc(0, 0, mr, 0, Math.PI * 2);
+      ctx.fillStyle = '#191F28'; ctx.fill();
+      ctx.beginPath(); ctx.arc(-mr * 0.28, -mr * 0.28, mr * 0.22, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fill();
+    } else if (o.k === 'blade') {
+      const teeth = 8, ir = o.r * 0.55;
+      ctx.beginPath();
+      for (let i = 0; i < teeth * 2; i++) {
+        const angle = (i / (teeth * 2)) * Math.PI * 2 - Math.PI / 2;
+        const r2 = i % 2 === 0 ? o.r : ir;
+        i === 0 ? ctx.moveTo(Math.cos(angle) * r2, Math.sin(angle) * r2)
+                : ctx.lineTo(Math.cos(angle) * r2, Math.sin(angle) * r2);
+      }
+      ctx.closePath(); ctx.fillStyle = '#191F28'; ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 0, ir * 0.45, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff'; ctx.fill();
+    } else if (o.k === 'sentry') {
+      ctx.fillStyle = '#191F28'; ctx.fillRect(-o.r, -o.r, o.r*2, o.r*2);
+      ctx.strokeStyle = '#F04452'; ctx.lineWidth = 2; ctx.strokeRect(-o.r, -o.r, o.r*2, o.r*2);
+      if (o.pulseT !== undefined && o.pulseT < 0.5) {
+        const ratio = o.pulseT / 0.5;
+        ctx.beginPath(); ctx.arc(0, 0, o.r * (1 + ratio * 1.5), 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(240,68,82,${1 - ratio})`; ctx.stroke();
+      }
+    } else if (o.k === 'laser') {
+      ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
+      ctx.strokeRect(-o.w!/2, -o.h!/2, o.w!, o.h!);
+      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      ctx.fillRect(-o.w!/2, -o.h!/2, o.w!, o.h!);
+    }
+    ctx.restore();
+  }
+}
+
+function collidesSpecial(dot: { x: number; y: number; r: number }, o: Special): boolean {
+  if (o.k === 'laser' && o.w !== undefined && o.h !== undefined) {
+    return Math.abs(dot.x - o.x) < o.w / 2 + dot.r && Math.abs(dot.y - o.y) < o.h / 2 + dot.r;
+  }
+  const dist = Math.hypot(dot.x - o.x, dot.y - o.y);
+  if (o.pulseT !== undefined && o.pulseT < 0.5) {
+    const pulseR = o.r * (1 + (o.pulseT / 0.5) * 1.5);
+    if (dist < dot.r + pulseR) return true;
+  }
+  return dist < dot.r + o.r;
+}
+
+// ── 픽업 업데이트 / 드로우 ────────────────────────────────────────────────────
+function updatePickups(dt: number) {
+  for (const p of pickups) p.life -= dt;
+  pickups = pickups.filter(p => p.life > 0);
+}
+
+function drawPickups() {
+  for (const p of pickups) {
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    const r = p.r * (1 + Math.sin(Date.now() * 0.01) * 0.1);
+    if (p.k === 'coin')        ctx.drawImage(ASSETS.coin,   -r, -r, r*2, r*2);
+    else if (p.k === 'shield') ctx.drawImage(ASSETS.shield, -r, -r, r*2, r*2);
+    else if (p.k === 'slowmo') ctx.drawImage(ASSETS.slowmo, -r, -r, r*2, r*2);
+    ctx.restore();
+  }
+}
+
+function collides(dot: { x: number; y: number; r: number }, p: Pickup): boolean {
+  return Math.hypot(dot.x - p.x, dot.y - p.y) < dot.r + p.r;
+}
+
 // ── Screen Shake + Direction Change ──────────────────────────────────────────
 let shakeIntensity = 0;
+// dir vars at top
 let shakeX = 0, shakeY = 0;
 let gameTime = 0;
-let nextDirChange = 15; // 첫 방향 전환까지 15초
-let dirChangeGrace = 0; // 방향전환 직후 난이도 완화 (1→0으로 감소)
+let nextDirChange = 15; 
 let dirHintAlpha = 0;
+
+function triggerShake(intensity: number) {
+  shakeIntensity = Math.max(shakeIntensity, intensity);
+}
 
 function updateShake(dt: number) {
   if (shakeIntensity > 0) {
@@ -261,11 +576,11 @@ function updateShake(dt: number) {
 }
 
 function triggerDirChange() {
-  shakeIntensity = 1;
+  triggerShake(1.0);
   const dirs = (['left', 'top', 'right', 'bottom'] as const).filter(d => d !== spawnDir);
   spawnDir = dirs[Math.floor(Math.random() * dirs.length)];
-  obstacles = []; // 기존 장애물 클리어
-  dirChangeGrace = 1.0; // 3초 난이도 완화 시작
+  obstacles = []; specials = [];
+  dirChangeGrace = 1.0; 
   dirHintAlpha = 1;
   // 색상 전환
   colorIdx = (colorIdx + 1) % COLORS.length;
@@ -282,16 +597,16 @@ function triggerDirChange() {
 const auto = {
   x: 0, y: 0, r: 6, vx: 0, vy: 0,
   reset() { this.x = W * 0.35; this.y = H * 0.5; this.vx = 0; this.vy = 0; },
-  update() {
+  update(dt: number) {
     let fx = 0, fy = 0;
     const sense = 160;
     for (const o of obstacles) {
       let cx: number, cy: number;
       if (o.k === 'dot' || o.k === 'cross') { cx = o.x; cy = o.y; }
       else {
-        const dx = o.x2 - o.x1, dy = o.y2 - o.y1, l2 = dx * dx + dy * dy;
-        const t = clamp(((this.x - o.x1) * dx + (this.y - o.y1) * dy) / l2, 0, 1);
-        cx = o.x1 + t * dx; cy = o.y1 + t * dy;
+        const dx = o.x2 - o.x1, dy = o.y2 - o.y1, l2 = dx*dx + dy*dy;
+        const t = clamp(((this.x - o.x1)*dx + (this.y - o.y1)*dy) / l2, 0, 1);
+        cx = o.x1 + t*dx; cy = o.y1 + t*dy;
       }
       const ddx = this.x - cx, ddy = this.y - cy;
       const d = Math.hypot(ddx, ddy);
@@ -311,7 +626,7 @@ const auto = {
     this.vy = (this.vy + fy) * 0.82;
     const spd = Math.hypot(this.vx, this.vy);
     if (spd > 5) { this.vx = this.vx / spd * 5; this.vy = this.vy / spd * 5; }
-    this.x += this.vx; this.y += this.vy;
+    this.x += this.vx * dt * 60; this.y += this.vy * dt * 60;
   },
 };
 
@@ -338,11 +653,12 @@ function explode(x: number, y: number) {
     particles.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: rand(1, 3), life: 1, decay: rand(0.012, 0.025) });
   }
 }
-function updateParticles() {
+function updateParticles(dt: number) {
+  const s = dt * 60;
   for (const p of particles) {
-    p.x += p.vx; p.y += p.vy;
-    p.vy += 0.18; p.vx *= 0.96; p.vy *= 0.96;
-    p.life -= p.decay;
+    p.x += p.vx * s; p.y += p.vy * s;
+    p.vy += 0.18 * s; p.vx *= Math.pow(0.96, s); p.vy *= Math.pow(0.96, s);
+    p.life -= p.decay * s;
   }
   particles = particles.filter(p => p.life > 0);
 }
@@ -355,14 +671,8 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
-// ── Best Score ────────────────────────────────────────────────────────────────
-const BEST_KEY = 'bestScore';
-function loadBest(): number { return parseInt(localStorage.getItem(BEST_KEY) ?? '0', 10); }
-function saveBest(n: number) { localStorage.setItem(BEST_KEY, String(n)); }
-
 // ── Milestone Toast ───────────────────────────────────────────────────────────
-const MILESTONES = [50, 100, 200, 300, 500, 1000];
-let milestoneIdx = 0;
+// milestoneIdx at top
 let toast: { text: string; alpha: number; y: number } | null = null;
 
 function updateToast(dt: number) {
@@ -385,14 +695,13 @@ function drawToast() {
 }
 
 // ── Score ─────────────────────────────────────────────────────────────────────
-let score = 0, scoreF = 0;
 const scoreEl = document.getElementById('score')!;
 function tickScore(dt: number) {
   const diff = Math.min(score / 100, 4);
   scoreF += (3 + diff * 2) * dt * 60 / 100;
   const prev = score;
   score = Math.floor(scoreF);
-  scoreEl.textContent = score + 'm';
+  scoreEl.innerHTML = score + '<span>m</span>';
 
   // 마일스톤 체크
   while (milestoneIdx < MILESTONES.length && score >= MILESTONES[milestoneIdx]) {
@@ -404,31 +713,46 @@ function tickScore(dt: number) {
   }
 }
 
-// ── Obstacle Spawner ─────────────────────────────────────────────────────────
-let obsTimer = 0, introObsTimer = 0;
+// ── Obstacle & Item Spawner ──────────────────────────────────────────────────
+let obsTimer = 0, specialTimer = 0, pickupTimer = 0, introObsTimer = 0;
+let nextSpecialInterval = rand(15, 25); // 첫 특수 장애물까지 대기 시간
+
 function spawnTick(dt: number) {
   if (dirChangeGrace > 0) dirChangeGrace = Math.max(0, dirChangeGrace - dt / 3);
   const diff = Math.min(score / 100, 4);
-  const baseInterval = score < 30
-    ? Math.max(0.22, 1.05 - diff * 0.42)
-    : Math.max(0.14, 1.0 - diff * 0.42);
-  const interval = baseInterval * (1 + dirChangeGrace * 0.8); // grace 중 최대 80% 간격 증가
+  const earlyEase = score < 30 ? 0.9 : 1.0;
+  const baseInterval = score < 15 ? 1.5
+                     : score < 40 ? 1.1
+                     : Math.max(0.22, 1.0 - diff * 0.18);
+  const interval = baseInterval * earlyEase * (1 + dirChangeGrace * 0.8) * (slowmoActiveT > 0 ? 1.5 : 1.0);
+
+  // 메인 장애물 (원본)
   obsTimer += dt;
   if (obsTimer >= interval) {
     obsTimer = 0;
     const obs = makeObs(false, spawnDir);
-    if (Array.isArray(obs)) obstacles.push(...obs);
+    if (Array.isArray(obs)) obs.forEach(o => obstacles.push(o));
     else obstacles.push(obs);
-    if (diff > 0.5 && Math.random() < 0.5) {
+    if (diff > 2.0 && Math.random() < 0.4) {
       const obs2 = makeObs(false, spawnDir);
-      if (Array.isArray(obs2)) obstacles.push(...obs2);
+      if (Array.isArray(obs2)) obs2.forEach(o => obstacles.push(o));
       else obstacles.push(obs2);
     }
-    if (diff > 1.5 && Math.random() < 0.4) {
-      const obs3 = makeObs(false, spawnDir);
-      if (Array.isArray(obs3)) obstacles.push(...obs3);
-      else obstacles.push(obs3);
-    }
+  }
+
+  // 특수 장애물 (낮은 빈도로 1개씩)
+  specialTimer += dt;
+  if (specialTimer >= nextSpecialInterval) {
+    specialTimer = 0;
+    const minInterval = score < 100 ? 14 : score < 300 ? 10 : 7;
+    nextSpecialInterval = rand(minInterval, minInterval + 10);
+    specials.push(makeSpecial(spawnDir));
+  }
+
+  pickupTimer += dt;
+  if (pickupTimer > rand(6, 10)) {
+    pickupTimer = 0;
+    spawnPickup();
   }
 }
 
@@ -468,9 +792,43 @@ let zoomFX = 0, zoomFY = 0;
 let deadT = 0;
 
 // ── Draw Helpers ─────────────────────────────────────────────────────────────
+let shieldActive = false;
+let slowmoActiveT = 0;
+
 function drawDot(x: number, y: number, r: number) {
-  ctx.fillStyle = gameColor;
-  ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  ctx.save();
+  ctx.translate(x, y);
+  
+  // Add a subtle glow/shadow to make the white dot pop against the light background
+  ctx.shadowColor = 'rgba(0,0,0,0.15)';
+  ctx.shadowBlur = 12;
+  
+  const skin = SKINS[equippedIdx];
+  if (skin.id === 'white') {
+    // Original Minimal Dot Identity (Hardcoded BLACK as requested)
+    ctx.beginPath();
+    ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = '#000'; 
+    ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  } else {
+    // Correctly draw the chosen frame (128x128 grid)
+    ctx.drawImage(ASSETS.skins, skin.sx, skin.sy, skin.sw, skin.sh, -r, -r, r*2, r*2);
+  }
+  
+  ctx.shadowBlur = 0; // Reset for shield
+  if (shieldActive) {
+    ctx.beginPath();
+    ctx.arc(0, 0, r + 8, 0, Math.PI * 2);
+    ctx.strokeStyle = '#00F0FF';
+    ctx.lineWidth = 4;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(0, 240, 255, 0.2)';
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawControlArea() {
@@ -487,12 +845,10 @@ function drawControlArea() {
   ctx.restore();
 
   if (touchPos) {
-    ctx.save();
-    ctx.globalAlpha = 0.08;
-    ctx.fillStyle = gameColor;
+    ctx.fillStyle = '#000';
     ctx.beginPath(); ctx.arc(touchPos.x, GH + touchPos.y, 40, 0, Math.PI * 2); ctx.fill();
     ctx.globalAlpha = 0.6;
-    ctx.fillStyle = gameColor;
+    ctx.fillStyle = '#000';
     ctx.beginPath(); ctx.arc(touchPos.x, GH + touchPos.y, 4, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   } else if (hintAlpha > 0) {
@@ -501,8 +857,11 @@ function drawControlArea() {
     const cx = W / 2, cy = GH + CH / 2 - 8;
 
     // ③ 중앙 플레이어 점
-    ctx.fillStyle = gameColor;
-    ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath(); ctx.arc(cx, cy, 6, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#fff';
+    ctx.lineWidth = 1;
+    ctx.stroke();
 
     // 좌우 화살표 + 점선
     const arrowOff = 36;
@@ -571,16 +930,17 @@ function loop(ts: number) {
     if (introObsTimer > 1.1) {
       introObsTimer = 0;
       const o = makeObs(true, 'left');
-      if (Array.isArray(o)) obstacles.push(...o); else obstacles.push(o);
+      if (Array.isArray(o)) o.forEach(x => obstacles.push(x));
+      else obstacles.push(o);
     }
-    updateObs(); auto.update();
+    updateObs(dt); auto.update(dt);
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
     drawObs();
     drawDot(auto.x, auto.y, auto.r);
   }
   else if (state === S.ZOOM) {
     zoomT += dt / ZOOM_DUR;
-    updateObs(); auto.update();
+    updateObs(dt); auto.update(dt);
     const t = easeOut(Math.min(zoomT, 1));
     const scale = 1 + t * 14;
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
@@ -598,16 +958,51 @@ function loop(ts: number) {
     if (zoomT >= 1) startGame();
   }
   else if (state === S.PLAY) {
-    tickScore(dt);
-    spawnTick(dt);
-    updateObs();
-    updateShake(dt);
+    // Item effects
+    if (slowmoActiveT > 0) {
+      slowmoActiveT = Math.max(0, slowmoActiveT - dt);
+      document.getElementById('slowmoIcon')!.style.display = 'flex';
+    } else {
+      document.getElementById('slowmoIcon')!.style.display = 'none';
+    }
+    if (shieldActive) {
+      document.getElementById('shieldIcon')!.style.display = 'flex';
+    } else {
+      document.getElementById('shieldIcon')!.style.display = 'none';
+    }
+
+    const currentDt = slowmoActiveT > 0 ? dt * 0.5 : dt;
+    tickScore(currentDt);
+    spawnTick(currentDt);
+    updateObs(currentDt);
+    updateSpecials(currentDt);
+    updatePickups(currentDt);
+    updateShake(currentDt);
+
+    // Collision with Pickups
+    for (let i = pickups.length - 1; i >= 0; i--) {
+      if (collides(player, pickups[i])) {
+        const p = pickups[i];
+        if (p.k === 'coin') {
+          sessionCoins++;
+          document.getElementById('sessionCoinVal')!.textContent = String(sessionCoins);
+          ait?.generateHapticFeedback({ type: 'success' });
+        } else if (p.k === 'shield') {
+          shieldActive = true;
+          ait?.generateHapticFeedback({ type: 'success' });
+        } else if (p.k === 'slowmo') {
+          slowmoActiveT = 5.0;
+          ait?.generateHapticFeedback({ type: 'success' });
+        }
+        pickups.splice(i, 1);
+      }
+    }
 
     // 플레이어 크기 단계 업데이트
     player.r = getPlayerR();
 
     // 방향 전환 트리거
-    gameTime += dt;
+    gameTime += currentDt;
     if (gameTime >= nextDirChange) {
       nextDirChange = gameTime + rand(12, 22);
       triggerDirChange();
@@ -616,10 +1011,17 @@ function loop(ts: number) {
     if (drag) hintAlpha = 0;
     if (invincibleT > 0) invincibleT = Math.max(0, invincibleT - dt);
 
-    if (invincibleT <= 0 && obstacles.some(o => collidesObs(player, o))) {
-      explode(player.x, player.y);
-      ait?.generateHapticFeedback({ type: 'error' });
-      state = S.DEAD; deadT = 0;
+    if (invincibleT <= 0 && (obstacles.some(o => collidesObs(player, o)) || specials.some(o => collidesSpecial(player, o)))) {
+      if (shieldActive) {
+        shieldActive = false;
+        invincibleT = 1.0;
+        triggerShake(0.5);
+        ait?.generateHapticFeedback({ type: 'error' });
+      } else {
+        explode(player.x, player.y);
+        ait?.generateHapticFeedback({ type: 'error' });
+        state = S.DEAD; deadT = 0;
+      }
     }
 
     const showPlayer = invincibleT <= 0 || Math.floor(invincibleT * 8) % 2 === 0;
@@ -629,6 +1031,8 @@ function loop(ts: number) {
     ctx.translate(shakeX, shakeY);
     ctx.beginPath(); ctx.rect(0, 0, W, GH); ctx.clip();
     drawObs();
+    drawSpecials();
+    drawPickups();
     drawDirChangeFlash();
     drawDirHint();
     drawToast();
@@ -638,11 +1042,11 @@ function loop(ts: number) {
   }
   else if (state === S.DEAD) {
     deadT += dt;
-    updateObs(); updateParticles();
+    updateObs(dt); updateSpecials(dt); updateParticles(dt);
     ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
     ctx.save();
     ctx.beginPath(); ctx.rect(0, 0, W, GH); ctx.clip();
-    drawObs(); drawParticles();
+    drawObs(); drawSpecials(); drawParticles();
     ctx.restore();
     drawControlArea();
     if (deadT > 1.8) { state = S.OVER; showGameOver(); }
@@ -661,26 +1065,37 @@ function startZoom() {
 }
 
 function startGame() {
-  obstacles = []; particles = [];
+  obstacles = []; specials = []; pickups = []; particles = [];
   score = 0; scoreF = 0;
-  obsTimer = 0; hintAlpha = 1;
+  obsTimer = 0; specialTimer = 0; pickupTimer = 0; hintAlpha = 1;
+  nextSpecialInterval = rand(15, 25);
   gameTime = 0; nextDirChange = 15;
   milestoneIdx = 0; toast = null;
   invincibleT = 0; hasContinued = false;
+  shieldActive = false; slowmoActiveT = 0;
+  sessionCoins = 0;
+  document.getElementById('sessionCoinVal')!.textContent = '0';
   spawnDir = 'left';
   shakeIntensity = 0;
   colorIdx = 0; gameColor = COLORS[0]; applyColor();
   dirHintAlpha = 0;
   resetPlayer();
   state = S.PLAY;
-  scoreEl.style.display = 'block';
+  scoreEl.style.visibility = 'visible';
+  document.getElementById('coinCountHUD')!.style.visibility = 'visible';
   startHintFade();
   preloadAd();
 }
 
 async function showGameOver() {
   document.getElementById('goScore')!.textContent = String(score);
+  document.getElementById('goCoins')!.textContent = String(sessionCoins);
   document.getElementById('continueBtn')!.style.display = hasContinued ? 'none' : '';
+  document.getElementById('doubleCoinsBtn')!.style.display = sessionCoins > 0 ? '' : 'none';
+
+  totalCoins += sessionCoins;
+  saveTotalCoins(totalCoins);
+  
   const best = loadBest();
   const goBestEl = document.getElementById('goBest')!;
   if (score > best) {
@@ -703,9 +1118,10 @@ async function showGameOver() {
 }
 
 function resetToIntro() {
-  obstacles = []; particles = [];
+  obstacles = []; specials = []; particles = [];
   auto.reset(); introObsTimer = 0;
-  scoreEl.style.display = 'none';
+  scoreEl.style.visibility = 'hidden';
+  document.getElementById('coinCountHUD')!.style.visibility = 'hidden';
   state = S.INTRO;
   document.getElementById('intro')!.classList.remove('hidden');
 }
@@ -727,8 +1143,8 @@ let hasContinued = false;
 function continueGame() {
   hasContinued = true;
   document.getElementById('gameOver')!.classList.remove('show');
-  obstacles = []; particles = [];
-  obsTimer = 0;
+  obstacles = []; specials = []; particles = [];
+  obsTimer = 0; specialTimer = 0;
   dirChangeGrace = 1.5;
   invincibleT = 2.0;
   resetPlayer();
@@ -774,6 +1190,26 @@ async function showAitAd(onComplete: () => void) {
   } catch (e) { console.warn('광고 표시 실패:', e); showAdFallback(onComplete); }
 }
 
+async function showRewardAd(onComplete: () => void) {
+  if (ait && aitRewardAdLoaded) {
+    aitRewardAdLoaded = false;
+    ait.showFullScreenAd({
+      options: { adGroupId: AIT_REWARD_AD_GROUP_ID },
+      onEvent: (event) => {
+        if (event.type === 'dismissed') {
+          onComplete();
+          preloadAitRewardAd();
+        } else if (event.type === 'failedToShow') {
+          showAdFallback(onComplete);
+        }
+      },
+      onError: () => { showAdFallback(onComplete); },
+    });
+    return;
+  }
+  showAdFallback(onComplete);
+}
+
 let adFallbackInterval: ReturnType<typeof setInterval> | null = null;
 function showAdFallback(onComplete: () => void) {
   const el = document.getElementById('adScreen')!;
@@ -795,6 +1231,16 @@ function showAdFallback(onComplete: () => void) {
 document.getElementById('startBtn')!.addEventListener('click', startZoom);
 document.getElementById('continueBtn')!.addEventListener('click', () => {
   showAitAd(continueGame);
+});
+document.getElementById('doubleCoinsBtn')!.addEventListener('click', () => {
+  showRewardAd(() => {
+    totalCoins += sessionCoins;
+    saveTotalCoins(totalCoins);
+    document.getElementById('doubleCoinsBtn')!.style.display = 'none';
+    const goCoinsEl = document.querySelector('.go-coins')!;
+    (goCoinsEl as HTMLElement).innerHTML = `2배 획득! <img src="/assets/coin.png" class="coin-img"> <span id="goCoins">${sessionCoins * 2}</span>`;
+    ait?.generateHapticFeedback({ type: 'success' }).catch(() => {});
+  });
 });
 document.getElementById('retryBtn')!.addEventListener('click', () => {
   document.getElementById('gameOver')!.classList.remove('show');
