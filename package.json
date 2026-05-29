@@ -9,14 +9,14 @@
     "bundle": "ait build"
   },
   "dependencies": {
-    "@apps-in-toss/web-framework": "^2.0.0",
+    "@apps-in-toss/web-framework": "^2.6.1",
     "@capacitor-community/admob": "^8.0.0",
-    "@capacitor/android": "^8.2.0",
-    "@capacitor/cli": "^8.2.0",
-    "@capacitor/core": "^8.2.0"
+    "@capacitor/android": "^8.3.4",
+    "@capacitor/cli": "^8.3.4",
+    "@capacitor/core": "^8.3.4"
   },
   "devDependencies": {
-    "typescript": "^5.4.0",
-    "vite": "^5.2.0"
+    "typescript": "^5.9.3",
+    "vite": "^5.4.21"
   }
 }
