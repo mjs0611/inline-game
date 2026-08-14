@@ -50,6 +50,26 @@ function preloadAitRewardAd() {
   });
 }
 
+// ── Haptic Grammar (유효 10종만, 시각 임팩트와 동일 프레임, 탭당 1개) ─────────
+type HapticType = 'tickWeak'|'tap'|'tickMedium'|'softMedium'|'basicWeak'|'basicMedium'|'success'|'error'|'wiggle'|'confetti';
+let lastTickHaptic = 0, lastHeavyHaptic = 0;
+function hapticUi(type: HapticType) {
+  ait?.generateHapticFeedback({ type } as Parameters<AitModule['generateHapticFeedback']>[0]).catch(() => {});
+}
+function hapticTick(type: HapticType) { // 연타 틱 80ms 스로틀
+  const n = performance.now();
+  if (n - lastTickHaptic < 80) return;
+  lastTickHaptic = n;
+  hapticUi(type);
+}
+function hapticHeavy(type: HapticType) { // 실시간 게임 굵은 이벤트 180ms 스로틀
+  const n = performance.now();
+  if (n - lastHeavyHaptic < 180) return;
+  lastHeavyHaptic = n;
+  hapticUi(type);
+}
+const REDUCED_MOTION = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
 // ── AdMob ────────────────────────────────────────────────────────────────────
 const ADMOB_INTERSTITIAL_ID = 'ca-app-pub-4557219410513767/2140145076';
 type AdMobType = typeof import('@capacitor-community/admob').AdMob;
@@ -178,7 +198,7 @@ function updateShopUI() {
         equippedIdx = idx;
         saveEquippedIdx(idx);
         updateShopUI();
-        ait?.generateHapticFeedback({ type: 'success' });
+        hapticUi('success');
       } else if (totalCoins >= skin.price) {
         totalCoins -= skin.price;
         saveTotalCoins(totalCoins);
@@ -187,12 +207,11 @@ function updateShopUI() {
         equippedIdx = idx;
         saveEquippedIdx(idx);
         updateShopUI();
-        ait?.generateHapticFeedback({ type: 'success' });
+        hapticUi('success');
       } else {
-        ait?.generateHapticFeedback({ type: 'error' });
-        div.style.transform = 'translateX(-4px)';
-        setTimeout(() => div.style.transform = 'translateX(4px)', 50);
-        setTimeout(() => div.style.transform = '', 100);
+        hapticUi('error');
+        div.classList.add('shake'); // CSS 0.25s = JS 250ms 일치
+        setTimeout(() => div.classList.remove('shake'), 250);
       }
     });
     grid.appendChild(div);
@@ -219,9 +238,94 @@ function resize() {
   H  = canvas.height = window.innerHeight;
   GH = Math.floor(H * 0.75);
   CH = H - GH;
+  cacheBg();
+  initDust();
 }
+
+// ── Pseudo-3D 공용 스프라이트 (하이라이트+AO+림라이트 / 소프트 섀도, 1회 생성) ──
+let sphereShade: HTMLCanvasElement;
+let softShadow: HTMLCanvasElement;
+function buildSprites() {
+  sphereShade = document.createElement('canvas');
+  sphereShade.width = sphereShade.height = 64;
+  const sc = sphereShade.getContext('2d')!;
+  sc.beginPath(); sc.arc(32, 32, 32, 0, Math.PI * 2); sc.clip();
+  let g = sc.createRadialGradient(22, 20, 2, 26, 24, 40); // 광원 좌상단
+  g.addColorStop(0, 'rgba(255,255,255,0.55)');
+  g.addColorStop(0.4, 'rgba(255,255,255,0.14)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  sc.fillStyle = g; sc.fillRect(0, 0, 64, 64);
+  g = sc.createRadialGradient(38, 42, 6, 34, 36, 34); // 하단 AO
+  g.addColorStop(0, 'rgba(0,0,0,0)');
+  g.addColorStop(0.75, 'rgba(0,0,0,0.06)');
+  g.addColorStop(1, 'rgba(0,0,0,0.32)');
+  sc.fillStyle = g; sc.fillRect(0, 0, 64, 64);
+  sc.beginPath(); sc.arc(32, 32, 29.5, Math.PI * 0.12, Math.PI * 0.62); // 하단 림라이트
+  sc.strokeStyle = 'rgba(255,255,255,0.2)'; sc.lineWidth = 3; sc.stroke();
+
+  softShadow = document.createElement('canvas');
+  softShadow.width = softShadow.height = 64;
+  const hc = softShadow.getContext('2d')!;
+  const hg = hc.createRadialGradient(32, 32, 4, 32, 32, 32);
+  hg.addColorStop(0, 'rgba(15,20,30,0.28)');
+  hg.addColorStop(0.6, 'rgba(15,20,30,0.12)');
+  hg.addColorStop(1, 'rgba(15,20,30,0)');
+  hc.fillStyle = hg; hc.fillRect(0, 0, 64, 64);
+}
+buildSprites();
+
+// ── 배경 그라데이션 + 비네트 (리사이즈 시에만 재생성) ─────────────────────────
+let bgGrad: CanvasGradient, vigGrad: CanvasGradient, edgeGrad: CanvasGradient;
+function cacheBg() {
+  bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+  bgGrad.addColorStop(0, '#ffffff');
+  bgGrad.addColorStop(1, '#eef1f6');
+  vigGrad = ctx.createRadialGradient(W / 2, GH * 0.42, Math.min(W, GH) * 0.35, W / 2, GH * 0.5, Math.max(W, GH) * 0.85);
+  vigGrad.addColorStop(0, 'rgba(0,0,0,0)');
+  vigGrad.addColorStop(1, 'rgba(25,31,40,0.06)');
+  edgeGrad = ctx.createLinearGradient(0, GH, 0, GH + 12);
+  edgeGrad.addColorStop(0, 'rgba(25,31,40,0.09)');
+  edgeGrad.addColorStop(1, 'rgba(25,31,40,0)');
+}
+function fillBg() {
+  ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = vigGrad; ctx.fillRect(0, 0, W, H);
+}
+
+// ── 패럴랙스 더스트 (배경 깊이 2층, 프레젠테이션 전용) ────────────────────────
+type Dust = { x: number; y: number; r: number; spd: number; a: number };
+let dust: Dust[] = [];
+function initDust() {
+  dust = [];
+  for (let i = 0; i < 26; i++) {
+    const far = i < 14;
+    dust.push({ x: Math.random() * W, y: Math.random() * GH, r: far ? 1.6 : 2.6, spd: far ? 10 : 24, a: far ? 0.05 : 0.08 });
+  }
+}
+function updateDust(dt: number) {
+  if (REDUCED_MOTION) return;
+  const dx = spawnDir === 'left' ? -1 : spawnDir === 'right' ? 1 : 0;
+  const dy = spawnDir === 'top' ? 1 : spawnDir === 'bottom' ? -1 : 0;
+  for (const d of dust) {
+    d.x = (d.x + dx * d.spd * dt + W) % W;
+    d.y = (d.y + dy * d.spd * dt + GH) % GH;
+  }
+}
+function drawDust() {
+  ctx.fillStyle = '#191F28';
+  for (const d of dust) {
+    ctx.globalAlpha = d.a;
+    ctx.beginPath(); ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
 resize();
 window.addEventListener('resize', resize);
+
+// WebView 컨텍스트 유실 대응
+canvas.addEventListener('contextlost', (e) => e.preventDefault());
+canvas.addEventListener('contextrestored', () => { lastT = 0; buildSprites(); cacheBg(); });
 
 // ── State ────────────────────────────────────────────────────────────────────
 const S = { INTRO: 0, ZOOM: 1, PLAY: 2, DEAD: 3, OVER: 4 } as const;
@@ -420,20 +524,46 @@ function updateObs(dt: number) {
   });
 }
 
+function traceObs(o: Obs) {
+  if (o.k === 'dot') {
+    ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill();
+  } else if (o.k === 'line') {
+    ctx.lineWidth = o.lw; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(o.x1, o.y1); ctx.lineTo(o.x2, o.y2); ctx.stroke();
+  } else {
+    ctx.lineWidth = 2; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(o.x - o.size, o.y); ctx.lineTo(o.x + o.size, o.y); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(o.x, o.y - o.size); ctx.lineTo(o.x, o.y + o.size); ctx.stroke();
+  }
+}
+
 function drawObs() {
+  // ① 캐스트 섀도 패스 (광원 좌상단 → 우하 오프셋)
+  ctx.save();
+  ctx.translate(3, 5);
+  ctx.globalAlpha = 0.1;
+  ctx.fillStyle = ctx.strokeStyle = '#191F28';
+  for (const o of obstacles) traceObs(o);
+  ctx.restore();
+  // ② 본체
   ctx.fillStyle = ctx.strokeStyle = gameColor;
+  for (const o of obstacles) traceObs(o);
+  // ③ 입체 셰이딩 / 베벨 하이라이트
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineCap = 'round';
   for (const o of obstacles) {
     if (o.k === 'dot') {
-      ctx.beginPath(); ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2); ctx.fill();
+      ctx.drawImage(sphereShade, o.x - o.r, o.y - o.r, o.r * 2, o.r * 2);
     } else if (o.k === 'line') {
-      ctx.lineWidth = o.lw; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(o.x1, o.y1); ctx.lineTo(o.x2, o.y2); ctx.stroke();
+      ctx.lineWidth = Math.max(1, o.lw * 0.5);
+      ctx.beginPath(); ctx.moveTo(o.x1 - 0.8, o.y1 - 1.2); ctx.lineTo(o.x2 - 0.8, o.y2 - 1.2); ctx.stroke();
     } else {
-      ctx.lineWidth = 2; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(o.x - o.size, o.y); ctx.lineTo(o.x + o.size, o.y); ctx.stroke();
-      ctx.beginPath(); ctx.moveTo(o.x, o.y - o.size); ctx.lineTo(o.x, o.y + o.size); ctx.stroke();
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(o.x - o.size, o.y - 1); ctx.lineTo(o.x + o.size, o.y - 1); ctx.stroke();
     }
   }
+  ctx.restore();
 }
 
 function collidesObs(dot: { x: number; y: number; r: number }, o: Obs): boolean {
@@ -469,11 +599,28 @@ function updateSpecials(dt: number) {
   specials = specials.filter(o => o.x > -300 && o.x < W + 300 && o.y > -300 && o.y < GH + 300);
 }
 
+function bladePath(r: number) {
+  const teeth = 8, ir = r * 0.55;
+  ctx.beginPath();
+  for (let i = 0; i < teeth * 2; i++) {
+    const angle = (i / (teeth * 2)) * Math.PI * 2 - Math.PI / 2;
+    const r2 = i % 2 === 0 ? r : ir;
+    i === 0 ? ctx.moveTo(Math.cos(angle) * r2, Math.sin(angle) * r2)
+            : ctx.lineTo(Math.cos(angle) * r2, Math.sin(angle) * r2);
+  }
+  ctx.closePath();
+}
+
 function drawSpecials() {
   for (const o of specials) {
     ctx.save();
     ctx.translate(o.x, o.y);
-    ctx.rotate(o.rot);
+    // 지면 앵커 소프트 섀도 (회전 전, 광원 좌상단)
+    if (o.k !== 'laser') {
+      const sr = o.r;
+      ctx.drawImage(softShadow, sr * 0.3 - sr * 1.1, sr * 0.35, sr * 2.2, sr * 1.1);
+    }
+    if (o.k !== 'laser') ctx.rotate(o.rot); // 레이저는 축정렬 히트박스와 일치하도록 비회전
     if (o.k === 'mine') {
       const s = 1 + Math.sin(Date.now() * 0.008) * 0.08;
       const mr = o.r * s;
@@ -486,22 +633,22 @@ function drawSpecials() {
       ctx.strokeStyle = '#191F28'; ctx.lineWidth = 2.5; ctx.lineCap = 'round'; ctx.stroke();
       ctx.beginPath(); ctx.arc(0, 0, mr, 0, Math.PI * 2);
       ctx.fillStyle = '#191F28'; ctx.fill();
-      ctx.beginPath(); ctx.arc(-mr * 0.28, -mr * 0.28, mr * 0.22, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255,255,255,0.25)'; ctx.fill();
+      ctx.drawImage(sphereShade, -mr, -mr, mr * 2, mr * 2); // 구체 셰이딩
     } else if (o.k === 'blade') {
-      const teeth = 8, ir = o.r * 0.55;
-      ctx.beginPath();
-      for (let i = 0; i < teeth * 2; i++) {
-        const angle = (i / (teeth * 2)) * Math.PI * 2 - Math.PI / 2;
-        const r2 = i % 2 === 0 ? o.r : ir;
-        i === 0 ? ctx.moveTo(Math.cos(angle) * r2, Math.sin(angle) * r2)
-                : ctx.lineTo(Math.cos(angle) * r2, Math.sin(angle) * r2);
-      }
-      ctx.closePath(); ctx.fillStyle = '#191F28'; ctx.fill();
-      ctx.beginPath(); ctx.arc(0, 0, ir * 0.45, 0, Math.PI * 2);
+      // 회전 모션 고스트 (잔상 2단)
+      ctx.fillStyle = '#191F28';
+      ctx.rotate(-0.55); ctx.globalAlpha = 0.08; bladePath(o.r); ctx.fill();
+      ctx.rotate(0.3);  ctx.globalAlpha = 0.16; bladePath(o.r); ctx.fill();
+      ctx.rotate(0.25); ctx.globalAlpha = 1;    bladePath(o.r); ctx.fill();
+      ctx.beginPath(); ctx.arc(0, 0, o.r * 0.55 * 0.45, 0, Math.PI * 2);
       ctx.fillStyle = '#ffffff'; ctx.fill();
+      ctx.globalAlpha = 0.7;
+      ctx.drawImage(sphereShade, -o.r, -o.r, o.r * 2, o.r * 2); // 메탈릭 셰이딩
+      ctx.globalAlpha = 1;
     } else if (o.k === 'sentry') {
       ctx.fillStyle = '#191F28'; ctx.fillRect(-o.r, -o.r, o.r*2, o.r*2);
+      ctx.fillStyle = 'rgba(255,255,255,0.22)'; ctx.fillRect(-o.r, -o.r, o.r*2, 3); // 상단 베벨
+      ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.fillRect(-o.r, o.r - 3, o.r*2, 3);   // 하단 AO
       ctx.strokeStyle = '#F04452'; ctx.lineWidth = 2; ctx.strokeRect(-o.r, -o.r, o.r*2, o.r*2);
       if (o.pulseT !== undefined && o.pulseT < 0.5) {
         const ratio = o.pulseT / 0.5;
@@ -509,10 +656,16 @@ function drawSpecials() {
         ctx.strokeStyle = `rgba(240,68,82,${1 - ratio})`; ctx.stroke();
       }
     } else if (o.k === 'laser') {
-      ctx.strokeStyle = '#000'; ctx.lineWidth = 2;
-      ctx.strokeRect(-o.w!/2, -o.h!/2, o.w!, o.h!);
-      ctx.fillStyle = 'rgba(0,0,0,0.18)';
+      const across = o.h! < o.w!;
+      const lg = across ? ctx.createLinearGradient(0, -o.h! / 2, 0, o.h! / 2)
+                        : ctx.createLinearGradient(-o.w! / 2, 0, o.w! / 2, 0);
+      lg.addColorStop(0, 'rgba(25,31,40,0.45)');
+      lg.addColorStop(0.5, 'rgba(25,31,40,0.08)'); // 볼록 튜브
+      lg.addColorStop(1, 'rgba(25,31,40,0.45)');
+      ctx.fillStyle = lg;
       ctx.fillRect(-o.w!/2, -o.h!/2, o.w!, o.h!);
+      ctx.strokeStyle = '#191F28'; ctx.lineWidth = 2;
+      ctx.strokeRect(-o.w!/2, -o.h!/2, o.w!, o.h!);
     }
     ctx.restore();
   }
@@ -537,14 +690,20 @@ function updatePickups(dt: number) {
 }
 
 function drawPickups() {
+  const now = Date.now();
   for (const p of pickups) {
-    ctx.save();
-    ctx.translate(p.x, p.y);
-    const r = p.r * (1 + Math.sin(Date.now() * 0.01) * 0.1);
-    if (p.k === 'coin')        ctx.drawImage(ASSETS.coin,   -r, -r, r*2, r*2);
-    else if (p.k === 'shield') ctx.drawImage(ASSETS.shield, -r, -r, r*2, r*2);
-    else if (p.k === 'slowmo') ctx.drawImage(ASSETS.slowmo, -r, -r, r*2, r*2);
-    ctx.restore();
+    const phase = p.x * 0.13 + p.y * 0.07;
+    const bob = REDUCED_MOTION ? 0 : Math.sin(now * 0.004 + phase) * 4;
+    const r = p.r * (1 + Math.sin(now * 0.01 + phase) * 0.08);
+    // 지면 앵커 캐스트 섀도 — 떠오를수록 작고 옅게
+    const lift = (bob + 4) / 8;
+    const sw = p.r * (2.1 - lift * 0.6);
+    ctx.globalAlpha = 0.95 - lift * 0.5;
+    ctx.drawImage(softShadow, p.x - sw / 2, p.y + p.r * 0.55, sw, sw * 0.42);
+    const img = p.k === 'coin' ? ASSETS.coin : p.k === 'shield' ? ASSETS.shield : ASSETS.slowmo;
+    ctx.globalAlpha = p.life < 1.5 ? 0.4 + 0.6 * Math.abs(Math.sin(now * 0.012)) : 1; // 소멸 임박 점멸
+    ctx.drawImage(img, p.x - r, p.y - bob - r, r * 2, r * 2);
+    ctx.globalAlpha = 1;
   }
 }
 
@@ -555,7 +714,7 @@ function collides(dot: { x: number; y: number; r: number }, p: Pickup): boolean 
 // ── Screen Shake + Direction Change ──────────────────────────────────────────
 let shakeIntensity = 0;
 // dir vars at top
-let shakeX = 0, shakeY = 0;
+let shakeX = 0, shakeY = 0, shakeRot = 0;
 let gameTime = 0;
 let nextDirChange = 15; 
 let dirHintAlpha = 0;
@@ -570,8 +729,9 @@ function updateShake(dt: number) {
     const mag = shakeIntensity * 28;
     shakeX = (Math.random() - 0.5) * mag;
     shakeY = (Math.random() - 0.5) * mag;
+    shakeRot = (Math.random() - 0.5) * 0.016 * shakeIntensity; // 회전 마이크로 셰이크
   } else {
-    shakeX = 0; shakeY = 0;
+    shakeX = 0; shakeY = 0; shakeRot = 0;
   }
 }
 
@@ -586,7 +746,7 @@ function triggerDirChange() {
   colorIdx = (colorIdx + 1) % COLORS.length;
   gameColor = COLORS[colorIdx];
   applyColor();
-  ait?.generateHapticFeedback({ type: 'wiggle' });
+  hapticHeavy('wiggle'); // 스크린셰이크 미러링
   const pulseEl = document.getElementById('dirPulse')!;
   pulseEl.classList.remove('pulse');
   void (pulseEl as HTMLElement).offsetWidth; // reflow
@@ -641,16 +801,27 @@ function getPlayerR(): number {
   return 14;
 }
 
-function resetPlayer() { player.x = W * 0.35; player.y = GH * 0.5; player.r = 6; }
+function resetPlayer() {
+  player.x = W * 0.35; player.y = GH * 0.5; player.r = 6;
+  prevPx = player.x; prevPy = player.y;
+  stretch = 1; stretchV = 0;
+  trail = [];
+}
 
-// ── Particles ────────────────────────────────────────────────────────────────
-type Particle = { x: number; y: number; vx: number; vy: number; r: number; life: number; decay: number };
+// ── Particles (중력 + 바닥 바운스 restitution 0.38~0.52) ─────────────────────
+type Particle = { x: number; y: number; vx: number; vy: number; r: number; life: number; decay: number; rest: number; color?: string };
 let particles: Particle[] = [];
 
 function explode(x: number, y: number) {
   for (let i = 0; i < 32; i++) {
     const a = Math.random() * Math.PI * 2, spd = rand(1, 7);
-    particles.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: rand(1, 3), life: 1, decay: rand(0.012, 0.025) });
+    particles.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: rand(1, 3), life: 1, decay: rand(0.012, 0.025), rest: rand(0.38, 0.52) });
+  }
+}
+function burst(x: number, y: number, n: number, color: string) {
+  for (let i = 0; i < n; i++) {
+    const a = rand(-Math.PI * 0.85, -Math.PI * 0.15), spd = rand(2, 5.5); // 상향 팝
+    particles.push({ x, y, vx: Math.cos(a) * spd, vy: Math.sin(a) * spd, r: rand(1.5, 3), life: 1, decay: rand(0.018, 0.032), rest: rand(0.38, 0.52), color });
   }
 }
 function updateParticles(dt: number) {
@@ -658,27 +829,60 @@ function updateParticles(dt: number) {
   for (const p of particles) {
     p.x += p.vx * s; p.y += p.vy * s;
     p.vy += 0.18 * s; p.vx *= Math.pow(0.96, s); p.vy *= Math.pow(0.96, s);
+    if (p.y > GH - p.r && p.vy > 0) { p.y = GH - p.r; p.vy *= -p.rest; p.vx *= 0.9; } // 바닥 바운스
     p.life -= p.decay * s;
   }
   particles = particles.filter(p => p.life > 0);
 }
 function drawParticles() {
-  ctx.fillStyle = gameColor;
   for (const p of particles) {
+    ctx.fillStyle = p.color ?? gameColor;
     ctx.globalAlpha = p.life * p.life;
     ctx.beginPath(); ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2); ctx.fill();
   }
   ctx.globalAlpha = 1;
 }
 
-// ── Milestone Toast ───────────────────────────────────────────────────────────
+// ── Squash & Stretch (감쇠 스프링, 진폭 0.8~1.22 + 속도 캡 = 연타 클램프) ────
+let stretch = 1, stretchV = 0, stretchAngle = 0;
+let prevPx = 0, prevPy = 0;
+function kickStretch(v: number) { stretchV = clamp(stretchV + v, -7, 7); }
+function updateStretch(dt: number, target: number) {
+  const a = (target - stretch) * 130 - stretchV * 13;
+  stretchV = clamp(stretchV + a * dt, -7, 7);
+  stretch = clamp(stretch + stretchV * dt, 0.8, 1.22);
+}
+
+// ── Motion Trail (플레이어 잔상, 프레젠테이션 전용) ───────────────────────────
+type TrailP = { x: number; y: number; r: number; life: number };
+let trail: TrailP[] = [];
+function updateTrail(dt: number) {
+  for (const t of trail) t.life -= dt * 3.2;
+  trail = trail.filter(t => t.life > 0);
+}
+function drawTrail() {
+  ctx.fillStyle = gameColor;
+  for (const t of trail) {
+    ctx.globalAlpha = t.life * t.life * 0.16;
+    ctx.beginPath(); ctx.arc(t.x, t.y, t.r * (0.5 + t.life * 0.5), 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ── Milestone Toast (스프링 스케일 등장) ─────────────────────────────────────
 // milestoneIdx at top
-let toast: { text: string; alpha: number; y: number } | null = null;
+let toast: { text: string; alpha: number; y: number; s: number; vs: number } | null = null;
 
 function updateToast(dt: number) {
   if (!toast) return;
   toast.alpha = Math.max(0, toast.alpha - dt * 0.9);
   toast.y -= dt * 28;
+  if (REDUCED_MOTION) toast.s = 1;
+  else {
+    const a = (1 - toast.s) * 160 - toast.vs * 11; // 감쇠 스프링 (오버슛)
+    toast.vs += a * dt;
+    toast.s += toast.vs * dt;
+  }
   if (toast.alpha <= 0) toast = null;
 }
 
@@ -690,7 +894,9 @@ function drawToast() {
   ctx.font = `900 ${Math.floor(Math.min(W, GH) * 0.13)}px "Space Grotesk", sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText(toast.text, W / 2, toast.y);
+  ctx.translate(W / 2, toast.y);
+  ctx.scale(toast.s, toast.s);
+  ctx.fillText(toast.text, 0, 0);
   ctx.restore();
 }
 
@@ -706,8 +912,8 @@ function tickScore(dt: number) {
   // 마일스톤 체크
   while (milestoneIdx < MILESTONES.length && score >= MILESTONES[milestoneIdx]) {
     if (prev < MILESTONES[milestoneIdx]) { // 이번 프레임에 처음 통과
-      toast = { text: MILESTONES[milestoneIdx] + 'm !', alpha: 1, y: GH * 0.38 };
-      ait?.generateHapticFeedback({ type: 'confetti' }).catch(() => {});
+      toast = { text: MILESTONES[milestoneIdx] + 'm !', alpha: 1, y: GH * 0.38, s: 0.4, vs: 0 };
+      hapticHeavy('confetti'); // 시각 임팩트(토스트 팝)와 동일 프레임
     }
     milestoneIdx++;
   }
@@ -795,30 +1001,38 @@ let deadT = 0;
 let shieldActive = false;
 let slowmoActiveT = 0;
 
-function drawDot(x: number, y: number, r: number) {
+function drawDot(x: number, y: number, r: number, deform = false) {
+  // 지면 앵커 캐스트 섀도 (광원 좌상단 → 우하)
+  ctx.drawImage(softShadow, x + r * 0.35 - r * 1.2, y + r * 0.75 - r * 0.6, r * 2.4, r * 1.2);
+
   ctx.save();
   ctx.translate(x, y);
-  
-  // Add a subtle glow/shadow to make the white dot pop against the light background
-  ctx.shadowColor = 'rgba(0,0,0,0.15)';
-  ctx.shadowBlur = 12;
-  
   const skin = SKINS[equippedIdx];
+  if (deform && !REDUCED_MOTION) {
+    if (skin.id === 'white') {
+      // 이동 방향축 스트레치 (원이라 회전 후 역회전으로 축만 정렬)
+      ctx.rotate(stretchAngle); ctx.scale(stretch, 1 / stretch); ctx.rotate(-stretchAngle);
+    } else {
+      const e = (stretch - 1) * 0.5; // 스킨 이미지는 축정렬 마일드 스쿼시
+      ctx.scale(1 + e, 1 - e);
+    }
+  }
   if (skin.id === 'white') {
-    // Original Minimal Dot Identity (Hardcoded BLACK as requested)
     ctx.beginPath();
     ctx.arc(0, 0, r, 0, Math.PI * 2);
-    ctx.fillStyle = '#000'; 
+    ctx.fillStyle = '#111';
     ctx.fill();
     ctx.strokeStyle = '#fff';
     ctx.lineWidth = 2;
     ctx.stroke();
+    ctx.drawImage(sphereShade, -r, -r, r * 2, r * 2); // 구체 셰이딩
   } else {
-    // Correctly draw the chosen frame (128x128 grid)
     ctx.drawImage(ASSETS.skins, skin.sx, skin.sy, skin.sw, skin.sh, -r, -r, r*2, r*2);
+    ctx.globalAlpha = 0.45;
+    ctx.drawImage(sphereShade, -r, -r, r * 2, r * 2);
+    ctx.globalAlpha = 1;
   }
-  
-  ctx.shadowBlur = 0; // Reset for shield
+
   if (shieldActive) {
     ctx.beginPath();
     ctx.arc(0, 0, r + 8, 0, Math.PI * 2);
@@ -832,8 +1046,11 @@ function drawDot(x: number, y: number, r: number) {
 }
 
 function drawControlArea() {
-  ctx.fillStyle = '#f3f3f3';
+  ctx.fillStyle = '#eef1f4';
   ctx.fillRect(0, GH, W, CH);
+  // 게임 평면이 위에 떠 있는 인셋 섀도
+  ctx.fillStyle = edgeGrad;
+  ctx.fillRect(0, GH, W, 12);
 
   // ① 구분선
   ctx.save();
@@ -845,11 +1062,12 @@ function drawControlArea() {
   ctx.restore();
 
   if (touchPos) {
-    ctx.fillStyle = '#000';
-    ctx.beginPath(); ctx.arc(touchPos.x, GH + touchPos.y, 40, 0, Math.PI * 2); ctx.fill();
-    ctx.globalAlpha = 0.6;
-    ctx.fillStyle = '#000';
-    ctx.beginPath(); ctx.arc(touchPos.x, GH + touchPos.y, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.save(); // (기존 unbalanced restore로 globalAlpha 누수되던 버그 픽스)
+    ctx.beginPath(); ctx.arc(touchPos.x, GH + touchPos.y, 34, 0, Math.PI * 2);
+    ctx.fillStyle = fgAlpha(0.12); ctx.fill();
+    ctx.strokeStyle = fgAlpha(0.45); ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.fillStyle = '#191F28';
+    ctx.beginPath(); ctx.arc(touchPos.x, GH + touchPos.y, 5, 0, Math.PI * 2); ctx.fill();
     ctx.restore();
   } else if (hintAlpha > 0) {
     ctx.save();
@@ -934,7 +1152,7 @@ function loop(ts: number) {
       else obstacles.push(o);
     }
     updateObs(dt); auto.update(dt);
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    fillBg();
     drawObs();
     drawDot(auto.x, auto.y, auto.r);
   }
@@ -943,7 +1161,7 @@ function loop(ts: number) {
     updateObs(dt); auto.update(dt);
     const t = easeOut(Math.min(zoomT, 1));
     const scale = 1 + t * 14;
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    fillBg();
     ctx.save();
     ctx.translate(W / 2, H / 2);
     ctx.scale(scale, scale);
@@ -978,6 +1196,20 @@ function loop(ts: number) {
     updateSpecials(currentDt);
     updatePickups(currentDt);
     updateShake(currentDt);
+    updateDust(currentDt);
+    updateTrail(dt);
+    updateParticles(currentDt);
+
+    // Squash & Stretch: 드래그 속도 → 이동축 스트레치 (프레젠테이션 전용)
+    const pvx = player.x - prevPx, pvy = player.y - prevPy;
+    const pspd = Math.hypot(pvx, pvy);
+    if (pspd > 1.5) stretchAngle = Math.atan2(pvy, pvx);
+    updateStretch(dt, 1 + Math.min(pspd * 0.014, 0.18));
+    if (!REDUCED_MOTION && pspd > 2) {
+      trail.push({ x: player.x, y: player.y, r: player.r, life: 1 });
+      if (trail.length > 16) trail.shift();
+    }
+    prevPx = player.x; prevPy = player.y;
 
     // Collision with Pickups
     for (let i = pickups.length - 1; i >= 0; i--) {
@@ -986,14 +1218,18 @@ function loop(ts: number) {
         if (p.k === 'coin') {
           sessionCoins++;
           document.getElementById('sessionCoinVal')!.textContent = String(sessionCoins);
-          ait?.generateHapticFeedback({ type: 'success' });
+          hapticTick('tickWeak');
+          burst(p.x, p.y, 8, '#f5a623');
         } else if (p.k === 'shield') {
           shieldActive = true;
-          ait?.generateHapticFeedback({ type: 'success' });
+          hapticTick('softMedium');
+          burst(p.x, p.y, 10, '#00c8ff');
         } else if (p.k === 'slowmo') {
           slowmoActiveT = 5.0;
-          ait?.generateHapticFeedback({ type: 'success' });
+          hapticTick('softMedium');
+          burst(p.x, p.y, 10, '#8b95a1');
         }
+        kickStretch(3); // 획득 팝
         pickups.splice(i, 1);
       }
     }
@@ -1016,43 +1252,52 @@ function loop(ts: number) {
         shieldActive = false;
         invincibleT = 1.0;
         triggerShake(0.5);
-        ait?.generateHapticFeedback({ type: 'error' });
+        kickStretch(-4); // 피격 스쿼시
+        hapticHeavy('error'); // 셰이크 미러링
       } else {
         explode(player.x, player.y);
-        ait?.generateHapticFeedback({ type: 'error' });
+        triggerShake(1.2);
+        trail = [];
+        hapticHeavy('error');
         state = S.DEAD; deadT = 0;
       }
     }
 
     const showPlayer = invincibleT <= 0 || Math.floor(invincibleT * 8) % 2 === 0;
     updateToast(dt);
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    fillBg();
     ctx.save();
+    ctx.translate(W / 2, H / 2); ctx.rotate(shakeRot); ctx.translate(-W / 2, -H / 2);
     ctx.translate(shakeX, shakeY);
     ctx.beginPath(); ctx.rect(0, 0, W, GH); ctx.clip();
+    drawDust();
     drawObs();
     drawSpecials();
     drawPickups();
+    drawParticles();
     drawDirChangeFlash();
     drawDirHint();
     drawToast();
-    if (showPlayer) drawDot(player.x, player.y, player.r);
+    drawTrail();
+    if (showPlayer) drawDot(player.x, player.y, player.r, true);
     ctx.restore();
     drawControlArea();
   }
   else if (state === S.DEAD) {
     deadT += dt;
-    updateObs(dt); updateSpecials(dt); updateParticles(dt);
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    updateObs(dt); updateSpecials(dt); updateParticles(dt); updateShake(dt);
+    fillBg();
     ctx.save();
+    ctx.translate(shakeX, shakeY);
     ctx.beginPath(); ctx.rect(0, 0, W, GH); ctx.clip();
+    drawDust();
     drawObs(); drawSpecials(); drawParticles();
     ctx.restore();
     drawControlArea();
     if (deadT > 1.8) { state = S.OVER; showGameOver(); }
   }
   else if (state === S.OVER) {
-    ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, W, H);
+    fillBg();
   }
   requestAnimationFrame(loop);
 }
@@ -1228,6 +1473,10 @@ function showAdFallback(onComplete: () => void) {
 }
 
 // ── 버튼 ─────────────────────────────────────────────────────────────────────
+// 모든 버튼 공통 tap 햅틱 (키 트래블 :active와 짝, 탭당 1개)
+document.addEventListener('click', (e) => {
+  if ((e.target as HTMLElement).closest('button')) hapticUi('tap');
+});
 document.getElementById('startBtn')!.addEventListener('click', startZoom);
 document.getElementById('continueBtn')!.addEventListener('click', () => {
   showAitAd(continueGame);
@@ -1239,7 +1488,7 @@ document.getElementById('doubleCoinsBtn')!.addEventListener('click', () => {
     document.getElementById('doubleCoinsBtn')!.style.display = 'none';
     const goCoinsEl = document.querySelector('.go-coins')!;
     (goCoinsEl as HTMLElement).innerHTML = `2배 획득! <img src="/assets/coin.png" class="coin-img"> <span id="goCoins">${sessionCoins * 2}</span>`;
-    ait?.generateHapticFeedback({ type: 'success' }).catch(() => {});
+    hapticUi('success');
   });
 });
 document.getElementById('retryBtn')!.addEventListener('click', () => {
