@@ -1,11 +1,6 @@
 name: Deploy to AIT Console
 
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**.md"
-      - ".github/**"
   workflow_dispatch:
 
 jobs:
