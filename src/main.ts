@@ -720,6 +720,7 @@ let nextDirChange = 15;
 let dirHintAlpha = 0;
 
 function triggerShake(intensity: number) {
+  if (REDUCED_MOTION) return; // 모션 감소: 화면 흔들림 끔(스트레치는 drawDot에서 이미 차단)
   shakeIntensity = Math.max(shakeIntensity, intensity);
 }
 
