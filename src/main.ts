@@ -13,6 +13,7 @@ type AitModule = {
 let ait: AitModule | null = null;
 let aitAdLoaded = false;
 let aitRewardAdLoaded = false;
+let aitRewardAdLoading = false;
 
 import('@apps-in-toss/web-framework').then((m) => {
   ait = {
@@ -41,12 +42,13 @@ function preloadAitAd() {
 }
 
 function preloadAitRewardAd() {
-  if (!ait) return;
+  if (!ait || aitRewardAdLoading) return;
   aitRewardAdLoaded = false;
+  aitRewardAdLoading = true;
   ait.loadFullScreenAd({
     options: { adGroupId: AIT_REWARD_AD_GROUP_ID },
-    onEvent: () => { aitRewardAdLoaded = true; },
-    onError: () => { aitRewardAdLoaded = false; },
+    onEvent: () => { aitRewardAdLoaded = true; aitRewardAdLoading = false; },
+    onError: () => { aitRewardAdLoaded = false; aitRewardAdLoading = false; },
   });
 }
 
@@ -1453,6 +1455,8 @@ async function showRewardAd(onComplete: () => void) {
     });
     return;
   }
+  // 미로드(초기 로드 실패 등): 이번엔 폴백, 다음 시청을 위해 다시 로드
+  preloadAitRewardAd();
   showAdFallback(onComplete);
 }
 
