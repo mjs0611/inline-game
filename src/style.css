@@ -147,7 +147,7 @@ button:active { transform: translateY(2px) scale(0.98); opacity: 0.92; transitio
 .go-coins { margin-bottom: 40px; font-weight: 700; color: #4e5968; }
 .goBtn { width: calc(100% - 80px); max-width: 320px; margin-bottom: 12px; }
 .goBtn.primary { background: #333; color: #fff; }
-.goBtn.gold { background: #f5a623; color: #fff; }
+.goBtn.gold { background: #f5a623; color: #222; }
 #goBest { font-weight: 700; margin-bottom: 24px; font-size: 14px; color: var(--toss-blue); }
 
 /* Animation Overlay */
