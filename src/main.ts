@@ -150,9 +150,9 @@ type SkinDef = { id: string; name: string; price: number; sx: number; sy: number
 const SKINS: SkinDef[] = [
   { id: 'white', name: 'WHITE',  price: 0,   sx: 0, sy: 0, sw: 1024, sh: 1024 },
   { id: 'ufo',   name: 'UFO',    price: 300, sx: 0, sy: 256, sw: 256,  sh: 256  },
-  { id: 'rocket',name: 'ROCKET', price: 800, sx: 0, sy: 512, sw: 256,  sh: 256 },
+  { id: 'rocket',name: 'ROCKET', price: 800, sx: 0, sy: 640, sw: 256,  sh: 256 },
 ];
-// Note: player_skins.png is a 1024x1024 grid with UFO at (0,0,512,512) and Rocket at (512,0,512,512).
+// player_skins.png (1024x1024): UFO crop (0,256,256,256), full rocket including exhaust (0,640,256,256).
 // player_default.png is a single 1024x1024 image.
 
 // ── Persistence Helpers ──────────────────────────────────────────────────────
