@@ -25,19 +25,19 @@ import('@apps-in-toss/web-framework').then((m) => {
     getUserKeyForGame: m.getUserKeyForGame,
   };
   document.getElementById('leaderboardBtn')!.style.display = 'block';
-  preloadAitAd();
-  preloadAitRewardAd();
+  // 광고 그룹은 한 번에 하나씩 로드한다. 동시에 로드하면 loaded 이벤트가 오지 않아 폴백만 뜬다.
+  preloadAitAd(() => preloadAitRewardAd());
   // 유저 식별자 조회 및 저장 (16번 체크리스트)
   m.getUserKeyForGame().catch(() => {});
 }).catch(() => {});
 
-function preloadAitAd() {
+function preloadAitAd(next?: () => void) {
   if (!ait) return;
   aitAdLoaded = false;
   ait.loadFullScreenAd({
     options: { adGroupId: AIT_AD_GROUP_ID },
-    onEvent: () => { aitAdLoaded = true; },
-    onError: () => { aitAdLoaded = false; },
+    onEvent: (e) => { if (e.type === 'loaded') aitAdLoaded = true; next?.(); next = undefined; },
+    onError: () => { aitAdLoaded = false; next?.(); next = undefined; },
   });
 }
 
@@ -47,7 +47,7 @@ function preloadAitRewardAd() {
   aitRewardAdLoading = true;
   ait.loadFullScreenAd({
     options: { adGroupId: AIT_REWARD_AD_GROUP_ID },
-    onEvent: () => { aitRewardAdLoaded = true; aitRewardAdLoading = false; },
+    onEvent: (e) => { if (e.type === 'loaded') aitRewardAdLoaded = true; aitRewardAdLoading = false; },
     onError: () => { aitRewardAdLoaded = false; aitRewardAdLoading = false; },
   });
 }
